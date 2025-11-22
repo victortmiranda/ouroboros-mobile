@@ -21,6 +21,11 @@ class MentoriaProvider with ChangeNotifier {
   bool _prioritizeRecentlyAdded = false;
   bool _prioritizeNotStudiedInTimeWindow = false;
   int _notStudiedInDays = 7;
+  bool _prioritizeNotRecentlyStudied = true; // NEW
+
+  // Relevancy
+  bool _prioritizeUnfinishedTopics = true;
+  bool _prioritizeTopicWeights = false;
 
   // Manual
   // Presets will be implemented later
@@ -37,6 +42,9 @@ class MentoriaProvider with ChangeNotifier {
   bool get prioritizeRecentlyAdded => _prioritizeRecentlyAdded;
   bool get prioritizeNotStudiedInTimeWindow => _prioritizeNotStudiedInTimeWindow;
   int get notStudiedInDays => _notStudiedInDays;
+  bool get prioritizeNotRecentlyStudied => _prioritizeNotRecentlyStudied; // NEW
+  bool get prioritizeUnfinishedTopics => _prioritizeUnfinishedTopics;
+  bool get prioritizeTopicWeights => _prioritizeTopicWeights;
 
   MentoriaProvider() {
     _loadPreferences();
@@ -55,6 +63,9 @@ class MentoriaProvider with ChangeNotifier {
     _prioritizeRecentlyAdded = prefs.getBool('prioritizeRecentlyAdded') ?? false;
     _prioritizeNotStudiedInTimeWindow = prefs.getBool('prioritizeNotStudiedInTimeWindow') ?? false;
     _notStudiedInDays = prefs.getInt('notStudiedInDays') ?? 7;
+    _prioritizeNotRecentlyStudied = prefs.getBool('prioritizeNotRecentlyStudied') ?? true; // NEW
+    _prioritizeUnfinishedTopics = prefs.getBool('prioritizeUnfinishedTopics') ?? true;
+    _prioritizeTopicWeights = prefs.getBool('prioritizeTopicWeights') ?? false;
     notifyListeners();
   }
 
@@ -133,6 +144,27 @@ class MentoriaProvider with ChangeNotifier {
     _notStudiedInDays = value;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('notStudiedInDays', value);
+    notifyListeners();
+  }
+
+  void setPrioritizeNotRecentlyStudied(bool value) async { // NEW
+    _prioritizeNotRecentlyStudied = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('prioritizeNotRecentlyStudied', value);
+    notifyListeners();
+  }
+
+  void setPrioritizeUnfinishedTopics(bool value) async {
+    _prioritizeUnfinishedTopics = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('prioritizeUnfinishedTopics', value);
+    notifyListeners();
+  }
+
+  void setPrioritizeTopicWeights(bool value) async {
+    _prioritizeTopicWeights = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('prioritizeTopicWeights', value);
     notifyListeners();
   }
 }
@@ -263,6 +295,15 @@ class MentoriaScreen extends StatelessWidget {
                 inactiveTrackColor: Colors.grey[300],
                 onChanged: provider.sequentialTopics ? null : (value) => provider.setPrioritizeNotStudiedInTimeWindow(value),
               ),
+              SwitchListTile( // NEW
+                title: const Text('Evitar repetição imediata'),
+                subtitle: const Text('Penaliza tópicos estudados muito recentemente para sugerir novos.'),
+                value: provider.prioritizeNotRecentlyStudied,
+                activeColor: Theme.of(context).colorScheme.primary,
+                inactiveThumbColor: Colors.grey[400],
+                inactiveTrackColor: Colors.grey[300],
+                onChanged: provider.sequentialTopics ? null : (value) => provider.setPrioritizeNotRecentlyStudied(value),
+              ),
               if (provider.prioritizeNotStudiedInTimeWindow)
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16.0),
@@ -286,6 +327,32 @@ class MentoriaScreen extends StatelessWidget {
                     ],
                   ),
                 ),
+              const Divider(),
+              const Padding(
+                padding: EdgeInsets.all(16.0),
+                child: Text(
+                  'Critérios de Relevância', // NEW SECTION
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+              SwitchListTile(
+                title: const Text('Priorizar tópicos não finalizados'),
+                subtitle: const Text('Dá mais peso a tópicos cuja teoria ainda não foi finalizada.'),
+                value: provider.prioritizeUnfinishedTopics,
+                activeColor: Theme.of(context).colorScheme.primary,
+                inactiveThumbColor: Colors.grey[400],
+                inactiveTrackColor: Colors.grey[300],
+                onChanged: provider.sequentialTopics ? null : (value) => provider.setPrioritizeUnfinishedTopics(value),
+              ),
+              SwitchListTile(
+                title: const Text('Peso dos Tópicos'),
+                subtitle: const Text('Prioriza tópicos com maior peso (definido por você ou calculado).'),
+                value: provider.prioritizeTopicWeights,
+                activeColor: Theme.of(context).colorScheme.primary,
+                inactiveThumbColor: Colors.grey[400],
+                inactiveTrackColor: Colors.grey[300],
+                onChanged: provider.sequentialTopics ? null : (value) => provider.setPrioritizeTopicWeights(value),
+              ),
             ],
           );
         },

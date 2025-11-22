@@ -543,6 +543,40 @@ class PlanningProvider with ChangeNotifier {
         criteriaCount++;
       }
 
+      // NEW: Prioritize by Topic Weights
+      if (mentoriaProvider?.prioritizeTopicWeights == true && topic.userWeight != null) {
+        // Normalize userWeight (1-5) to a 0.0-1.0 scale
+        double normalizedWeight = (topic.userWeight! - 1) / 4.0;
+        totalScore += normalizedWeight;
+        criteriaCount++;
+      }
+
+      // NEW: Prioritize topics not recently studied
+      if (mentoriaProvider?.prioritizeNotRecentlyStudied == true) {
+        if (topicRecords.isNotEmpty) {
+          topicRecords.sort((a, b) => DateTime.parse(b.date).compareTo(DateTime.parse(a.date)));
+          final lastStudiedDate = DateTime.parse(topicRecords.first.date);
+          final difference = now.difference(lastStudiedDate);
+          if (difference.inDays < 1) { // Penalize if studied within the last day
+            totalScore -= 0.5; // Significant penalty
+          }
+        } else {
+          totalScore += 0.5; // Slightly prefer topics never studied
+        }
+        criteriaCount++;
+      }
+
+      // NEW: Prioritize unfinished topics
+      if (mentoriaProvider?.prioritizeUnfinishedTopics == true) {
+        final bool teoriaFinalizada = topicRecords.any((r) => r.teoria_finalizada);
+        if (teoriaFinalizada) {
+          totalScore += 0.0; // No score for finished theory
+        } else {
+          totalScore += 1.0; // Full score for unfinished theory
+        }
+        criteriaCount++;
+      }
+
       double finalScore = criteriaCount > 0 ? totalScore / criteriaCount : 0;
 
       if (finalScore > maxScore) {

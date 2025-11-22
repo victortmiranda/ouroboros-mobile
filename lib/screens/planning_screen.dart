@@ -176,15 +176,39 @@ class _PlanningScreenState extends State<PlanningScreen> {
     planningProvider.setStudyCycle(updatedCycle);
   }
 
-  void _onReorderSessions(int oldIndex, int newIndex) {
+  void _onReorderSessions(List<StudySession> displayedList, int oldIndex, int newIndex) {
     final planningProvider = Provider.of<PlanningProvider>(context, listen: false);
-    final reorderedCycle = List<StudySession>.from(planningProvider.studyCycle!);
+    final currentFullCycle = List<StudySession>.from(planningProvider.studyCycle!);
+    
+    // 1. Perform the reorder operation on a mutable copy of the displayedList.
+    final List<StudySession> reorderedDisplayedList = List<StudySession>.from(displayedList);
     if (oldIndex < newIndex) {
-      newIndex -= 1;
+      newIndex -= 1; // Adjust index for ReorderableListView when moving downwards
     }
-    final item = reorderedCycle.removeAt(oldIndex);
-    reorderedCycle.insert(newIndex, item);
-    planningProvider.setStudyCycle(reorderedCycle);
+    final StudySession movedItem = reorderedDisplayedList.removeAt(oldIndex);
+    reorderedDisplayedList.insert(newIndex, movedItem);
+
+    // 2. Reconstruct the full cycle by incorporating the reordered displayed items.
+    final List<StudySession> newFullCycle = [];
+    int reorderedDisplayedListIndex = 0;
+
+    for (final sessionInFullCycle in currentFullCycle) {
+      // If the session from the full cycle was originally part of the displayedList,
+      // it means it's one of the reorderable items. We should take the next item
+      // from our `reorderedDisplayedList`.
+      if (displayedList.contains(sessionInFullCycle)) {
+        if (reorderedDisplayedListIndex < reorderedDisplayedList.length) {
+          newFullCycle.add(reorderedDisplayedList[reorderedDisplayedListIndex]);
+          reorderedDisplayedListIndex++;
+        }
+      } else {
+        // This session was not part of the displayed (reordered) list,
+        // so add it to the new full cycle in its original relative position.
+        newFullCycle.add(sessionInFullCycle);
+      }
+    }
+    
+    planningProvider.setStudyCycle(newFullCycle);
   }
 
   @override
@@ -473,7 +497,7 @@ class _PlanningScreenState extends State<PlanningScreen> {
                         isEditMode: widget.isEditMode,
                         onDeleteSession: _onDeleteSession,
                         onDuplicateSession: _onDuplicateSession,
-                        onReorder: _onReorderSessions,
+                        onReorder: (oldIdx, newIdx) => _onReorderSessions(pendingSessions, oldIdx, newIdx),
                         emptyListMessage: 'Nenhuma sessão pendente.',
                         sessionProgressMap: planningProvider.sessionProgressMap,
                       ),
@@ -500,7 +524,7 @@ class _PlanningScreenState extends State<PlanningScreen> {
                         isEditMode: widget.isEditMode,
                         onDeleteSession: _onDeleteSession,
                         onDuplicateSession: _onDuplicateSession,
-                        onReorder: _onReorderSessions,
+                        onReorder: (oldIdx, newIdx) => _onReorderSessions(completedSessions, oldIdx, newIdx),
                         emptyListMessage: 'Nenhuma sessão concluída ainda.',
                         sessionProgressMap: planningProvider.sessionProgressMap,
                         extraStudyTimeBySubjectId: planningProvider.extraStudyTimeBySubjectId, // Passando os dados aqui
