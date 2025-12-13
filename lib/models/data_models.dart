@@ -40,7 +40,10 @@ class Topic {
   List<Topic>? sub_topics;
   bool? is_grouping_topic;
   final int? question_count;
-  final int? userWeight; 
+  final int? userWeight;
+  bool isSelected;
+  bool isEditing;
+  final int? lastModified;
 
   Topic({
     this.id,
@@ -50,24 +53,51 @@ class Topic {
     this.sub_topics,
     this.is_grouping_topic,
     this.question_count,
-    this.userWeight, 
+    this.userWeight,
+    this.isSelected = true, // Default to selected
+    this.isEditing = false,
+    this.lastModified,
   });
 
   factory Topic.fromMap(Map<String, dynamic> map) {
-    var subTopicsList = map['sub_topics'] as List<dynamic>?;
-    List<Topic> subTopics = subTopicsList != null
-        ? subTopicsList.map((i) => Topic.fromMap(i)).toList()
-        : [];
+    List<Topic> subTopics = [];
+    if (map['sub_topics'] != null) {
+      subTopics = (map['sub_topics'] as List<dynamic>)
+          .map((t) => Topic.fromMap(t as Map<String, dynamic>)) // Recursive call with cast
+          .toList();
+    }
 
     return Topic(
       id: map['id'],
       subject_id: map['subject_id'],
       topic_text: map['topic_text'],
       parent_id: map['parent_id'],
-      sub_topics: subTopics,
-      is_grouping_topic: map['is_grouping_topic'] == 1 || (map['is_grouping_topic'] is bool && map['is_grouping_topic']),
+      sub_topics: subTopics, // Initially empty, will be populated by DatabaseService
+      is_grouping_topic: map['is_grouping_topic'] == 1, // Directly read from DB
       question_count: map['question_count'],
-      userWeight: map['userWeight'], 
+      userWeight: map['userWeight'],
+      lastModified: map['lastModified'] ?? DateTime.now().millisecondsSinceEpoch,
+    );
+  }
+
+  factory Topic.fromBackupMap(Map<String, dynamic> map) {
+    List<Topic> subTopics = [];
+    if (map['sub_topics'] != null) {
+      subTopics = (map['sub_topics'] as List<dynamic>)
+          .map((t) => Topic.fromBackupMap(t)) // Recursive call
+          .toList();
+    }
+
+    return Topic(
+      id: map['id'], 
+      subject_id: map['subject_id'],
+      topic_text: map['topic_text'],
+      parent_id: map['parent_id'],
+      sub_topics: subTopics, // Use the recursively populated list
+      is_grouping_topic: map['is_grouping_topic'] ?? false,
+      question_count: map['question_count'],
+      userWeight: map['userWeight'],
+      lastModified: map['lastModified'] ?? DateTime.now().millisecondsSinceEpoch,
     );
   }
 
@@ -80,6 +110,7 @@ class Topic {
       'is_grouping_topic': (is_grouping_topic ?? false) ? 1 : 0,
       'question_count': question_count,
       'userWeight': userWeight,
+      'lastModified': lastModified,
     };
   }
 
@@ -93,6 +124,7 @@ class Topic {
       'question_count': question_count,
       'userWeight': userWeight,
       'sub_topics': sub_topics?.map((t) => t.toMapForBackup()).toList(),
+      'lastModified': lastModified,
     };
   }
 
@@ -104,7 +136,10 @@ class Topic {
     List<Topic>? sub_topics,
     bool? is_grouping_topic,
     int? question_count,
-    int? userWeight, 
+    int? userWeight,
+    bool? isSelected,
+    bool? isEditing,
+    int? lastModified,
   }) {
     return Topic(
       id: id ?? this.id,
@@ -114,7 +149,10 @@ class Topic {
       sub_topics: sub_topics ?? this.sub_topics,
       is_grouping_topic: is_grouping_topic ?? this.is_grouping_topic,
       question_count: question_count ?? this.question_count,
-      userWeight: userWeight ?? this.userWeight, 
+      userWeight: userWeight ?? this.userWeight,
+      isSelected: isSelected ?? this.isSelected,
+      isEditing: isEditing ?? this.isEditing,
+      lastModified: lastModified ?? this.lastModified,
     );
   }
 }class Subject {
@@ -125,6 +163,7 @@ class Topic {
   final String color;
   final int? total_topics_count;
   final String? import_source;
+  final int lastModified;
 
   Subject({
     required this.id,
@@ -134,6 +173,7 @@ class Topic {
     required this.color,
     this.total_topics_count,
     this.import_source,
+    required this.lastModified,
   });
 
   factory Subject.fromMap(Map<String, dynamic> map, List<Topic> topics) {
@@ -145,6 +185,7 @@ class Topic {
       topics: topics,
       total_topics_count: map['total_topics_count'],
       import_source: map['import_source'],
+      lastModified: map['lastModified'] ?? DateTime.now().millisecondsSinceEpoch,
     );
   }
 
@@ -156,6 +197,7 @@ class Topic {
       'color': color,
       'total_topics_count': total_topics_count,
       'import_source': import_source,
+      'lastModified': lastModified,
     };
   }
 
@@ -168,6 +210,7 @@ class Topic {
       'total_topics_count': total_topics_count,
       'import_source': import_source,
       'topics': topics.map((t) => t.toMapForBackup()).toList(),
+      'lastModified': lastModified,
     };
   }
 
@@ -179,6 +222,7 @@ class Topic {
     String? color,
     int? total_topics_count,
     String? import_source,
+    int? lastModified,
   }) {
     return Subject(
       id: id ?? this.id,
@@ -188,6 +232,7 @@ class Topic {
       color: color ?? this.color,
       total_topics_count: total_topics_count ?? this.total_topics_count,
       import_source: import_source ?? this.import_source,
+      lastModified: lastModified ?? this.lastModified,
     );
   }
 
@@ -242,7 +287,8 @@ class StudyRecord {
   final String plan_id;
   final String date;
   final String subject_id;
-  final String topic;
+  final List<String> topic_texts; // Alterado para lista de textos de tópicos
+  final List<String> topic_ids;   // Adicionado para IDs de tópicos
   final String category;
   final int study_time;
   final Map<String, int> questions;
@@ -253,6 +299,7 @@ class StudyRecord {
   final bool count_in_planning;
   final List<dynamic> pages;
   final List<dynamic> videos;
+  final int lastModified;
 
   StudyRecord({
     required this.id,
@@ -260,7 +307,8 @@ class StudyRecord {
     required this.plan_id,
     required this.date,
     required this.subject_id,
-    required this.topic,
+    required this.topic_texts, // Alterado
+    required this.topic_ids,   // Adicionado
     required this.category,
     required this.study_time,
     required this.questions,
@@ -271,6 +319,7 @@ class StudyRecord {
     required this.count_in_planning,
     required this.pages,
     required this.videos,
+    required this.lastModified,
   });
 
   factory StudyRecord.fromMap(Map<String, dynamic> map) {
@@ -280,7 +329,8 @@ class StudyRecord {
       plan_id: map['plan_id'],
       date: map['date'],
       subject_id: map['subject_id'],
-      topic: map['topic'],
+      topic_texts: List<String>.from(jsonDecode(map['topic_texts'] ?? '[]')), // Decodificar de JSON, com fallback
+      topic_ids: List<String>.from(jsonDecode(map['topic_ids'] ?? '[]')),     // Decodificar de JSON, com fallback
       category: map['category'],
       study_time: map['study_time'],
       questions: Map<String, int>.from(jsonDecode(map['questions'])),
@@ -291,6 +341,7 @@ class StudyRecord {
       count_in_planning: map['count_in_planning'] == 1,
       pages: List<dynamic>.from(jsonDecode(map['pages'])),
       videos: List<dynamic>.from(jsonDecode(map['videos'])),
+      lastModified: map['lastModified'] ?? DateTime.now().millisecondsSinceEpoch,
     );
   }
 
@@ -301,7 +352,8 @@ class StudyRecord {
       'plan_id': plan_id,
       'date': date,
       'subject_id': subject_id,
-      'topic': topic,
+      'topic_texts': jsonEncode(topic_texts), // Codificar para JSON
+      'topic_ids': jsonEncode(topic_ids),     // Codificar para JSON
       'category': category,
       'study_time': study_time,
       'questions': jsonEncode(questions),
@@ -312,6 +364,7 @@ class StudyRecord {
       'count_in_planning': count_in_planning ? 1 : 0,
       'pages': jsonEncode(pages),
       'videos': jsonEncode(videos),
+      'lastModified': lastModified,
     };
   }
 
@@ -321,7 +374,8 @@ class StudyRecord {
     String? plan_id,
     String? date,
     String? subject_id,
-    String? topic,
+    List<String>? topic_texts, // Alterado
+    List<String>? topic_ids,   // Adicionado
     String? category,
     int? study_time,
     Map<String, int>? questions,
@@ -332,6 +386,7 @@ class StudyRecord {
     bool? count_in_planning,
     List<dynamic>? pages,
     List<dynamic>? videos,
+    int? lastModified,
   }) {
     return StudyRecord(
       id: id ?? this.id,
@@ -339,7 +394,8 @@ class StudyRecord {
       plan_id: plan_id ?? this.plan_id,
       date: date ?? this.date,
       subject_id: subject_id ?? this.subject_id,
-      topic: topic ?? this.topic,
+      topic_texts: topic_texts ?? this.topic_texts, // Alterado
+      topic_ids: topic_ids ?? this.topic_ids,     // Adicionado
       category: category ?? this.category,
       study_time: study_time ?? this.study_time,
       questions: questions ?? this.questions,
@@ -350,6 +406,7 @@ class StudyRecord {
       count_in_planning: count_in_planning ?? this.count_in_planning,
       pages: pages ?? this.pages,
       videos: videos ?? this.videos,
+      lastModified: lastModified ?? this.lastModified,
     );
   }
 }
@@ -387,6 +444,7 @@ class Plan {
   final String? banca;
   final String? iconUrl;
   final List<Subject>? subjects; // Adicionado
+  final int lastModified;
 
   Plan({
     required this.id,
@@ -397,6 +455,7 @@ class Plan {
     this.banca,
     this.iconUrl,
     this.subjects, // Adicionado
+    required this.lastModified,
   });
 
   factory Plan.fromMap(Map<String, dynamic> map) {
@@ -408,6 +467,7 @@ class Plan {
       edital: map['edital'],
       banca: map['banca'],
       iconUrl: map['iconUrl'],
+      lastModified: map['lastModified'] ?? DateTime.now().millisecondsSinceEpoch,
     );
   }
 
@@ -420,6 +480,7 @@ class Plan {
       'edital': edital,
       'banca': banca,
       'iconUrl': iconUrl,
+      'lastModified': lastModified,
     };
   }
 
@@ -432,6 +493,7 @@ class Plan {
     String? banca,
     String? iconUrl,
     List<Subject>? subjects,
+    int? lastModified,
   }) {
     return Plan(
       id: id ?? this.id,
@@ -442,6 +504,7 @@ class Plan {
       banca: banca ?? this.banca,
       iconUrl: iconUrl ?? this.iconUrl,
       subjects: subjects ?? this.subjects,
+      lastModified: lastModified ?? this.lastModified,
     );
   }
 }
@@ -455,10 +518,11 @@ class ReviewRecord {
   final String status;
   final String original_date;
   final String? subject_id;
-  final String topic;
+  final List<String> topics;
   final String review_period;
   final String? completed_date;
   final bool ignored;
+  final int lastModified;
 
   ReviewRecord({
     required this.id,
@@ -469,10 +533,11 @@ class ReviewRecord {
     required this.status,
     required this.original_date,
     this.subject_id,
-    required this.topic,
+    required this.topics,
     required this.review_period,
     this.completed_date,
     this.ignored = false,
+    required this.lastModified,
   });
 
   Map<String, dynamic> toMap() {
@@ -485,14 +550,27 @@ class ReviewRecord {
       'status': status,
       'original_date': original_date,
       'subject_id': subject_id,
-      'topic': topic,
+      'topics': jsonEncode(topics),
       'review_period': review_period,
       'completed_date': completed_date,
       'ignored': ignored ? 1 : 0,
+      'lastModified': lastModified,
     };
   }
 
   factory ReviewRecord.fromMap(Map<String, dynamic> map) {
+    // Adicionado para compatibilidade retroativa
+    List<String> topicsList = [];
+    if (map['topics'] != null) {
+      final decoded = jsonDecode(map['topics']);
+      if (decoded is List) {
+        topicsList = List<String>.from(decoded);
+      }
+    } else if (map['topic'] != null) {
+      // Se 'topics' não existir, tenta usar o campo antigo 'topic'
+      topicsList = [map['topic'] as String];
+    }
+
     return ReviewRecord(
       id: map['id'],
       userId: map['userId'],
@@ -502,10 +580,11 @@ class ReviewRecord {
       status: map['status'],
       original_date: map['original_date'],
       subject_id: map['subject_id'],
-      topic: map['topic'],
+      topics: topicsList,
       review_period: map['review_period'],
       completed_date: map['completed_date'],
       ignored: map['ignored'] == 1,
+      lastModified: map['lastModified'] ?? DateTime.now().millisecondsSinceEpoch,
     );
   }
 
@@ -518,10 +597,11 @@ class ReviewRecord {
     String? status,
     String? original_date,
     String? subject_id,
-    String? topic,
+    List<String>? topics,
     String? review_period,
     String? completed_date,
     bool? ignored,
+    int? lastModified,
   }) {
     return ReviewRecord(
       id: id ?? this.id,
@@ -532,10 +612,11 @@ class ReviewRecord {
       status: status ?? this.status,
       original_date: original_date ?? this.original_date,
       subject_id: subject_id ?? this.subject_id,
-      topic: topic ?? this.topic,
+      topics: topics ?? this.topics,
       review_period: review_period ?? this.review_period,
       completed_date: completed_date ?? this.completed_date,
       ignored: ignored ?? this.ignored,
+      lastModified: lastModified ?? this.lastModified,
     );
   }
 }
@@ -550,6 +631,7 @@ class SimuladoSubject {
   final int correct;
   final int incorrect;
   final String color;
+  final int? lastModified;
 
   SimuladoSubject({
     this.id,
@@ -561,6 +643,7 @@ class SimuladoSubject {
     required this.correct,
     required this.incorrect,
     required this.color,
+    this.lastModified,
   });
 
   factory SimuladoSubject.fromMap(Map<String, dynamic> map) {
@@ -574,6 +657,7 @@ class SimuladoSubject {
       correct: map['correct'],
       incorrect: map['incorrect'],
       color: map['color'],
+      lastModified: map['lastModified'] ?? DateTime.now().millisecondsSinceEpoch,
     );
   }
 
@@ -588,7 +672,34 @@ class SimuladoSubject {
       'correct': correct,
       'incorrect': incorrect,
       'color': color,
+      'lastModified': lastModified,
     };
+  }
+
+  SimuladoSubject copyWith({
+    int? id,
+    String? simulado_record_id,
+    String? subject_id,
+    String? subject_name,
+    double? weight,
+    int? total_questions,
+    int? correct,
+    int? incorrect,
+    String? color,
+    int? lastModified,
+  }) {
+    return SimuladoSubject(
+      id: id ?? this.id,
+      simulado_record_id: simulado_record_id ?? this.simulado_record_id,
+      subject_id: subject_id ?? this.subject_id,
+      subject_name: subject_name ?? this.subject_name,
+      weight: weight ?? this.weight,
+      total_questions: total_questions ?? this.total_questions,
+      correct: correct ?? this.correct,
+      incorrect: incorrect ?? this.incorrect,
+      color: color ?? this.color,
+      lastModified: lastModified ?? this.lastModified,
+    );
   }
 }
 
@@ -603,6 +714,7 @@ class SimuladoRecord {
   final String? time_spent;
   final String? comments;
   final List<SimuladoSubject> subjects;
+  final int lastModified;
 
   SimuladoRecord({
     required this.id,
@@ -615,6 +727,7 @@ class SimuladoRecord {
     this.time_spent,
     this.comments,
     required this.subjects,
+    required this.lastModified,
   });
 
   factory SimuladoRecord.fromMap(Map<String, dynamic> map, List<SimuladoSubject> subjects) {
@@ -629,6 +742,7 @@ class SimuladoRecord {
       time_spent: map['time_spent'],
       comments: map['comments'],
       subjects: subjects,
+      lastModified: map['lastModified'] ?? DateTime.now().millisecondsSinceEpoch,
     );
   }
 
@@ -644,7 +758,36 @@ class SimuladoRecord {
       'time_spent': time_spent,
       'comments': comments,
       'subjects': subjects.map((s) => s.toMap()).toList(),
+      'lastModified': lastModified,
     };
+  }
+
+  SimuladoRecord copyWith({
+    String? id,
+    String? userId,
+    String? plan_id,
+    String? date,
+    String? name,
+    String? style,
+    String? banca,
+    String? time_spent,
+    String? comments,
+    List<SimuladoSubject>? subjects,
+    int? lastModified,
+  }) {
+    return SimuladoRecord(
+      id: id ?? this.id,
+      userId: userId ?? this.userId,
+      plan_id: plan_id ?? this.plan_id,
+      date: date ?? this.date,
+      name: name ?? this.name,
+      style: style ?? this.style,
+      banca: banca ?? this.banca,
+      time_spent: time_spent ?? this.time_spent,
+      comments: comments ?? this.comments,
+      subjects: subjects ?? this.subjects,
+      lastModified: lastModified ?? this.lastModified,
+    );
   }
 }
 
@@ -664,29 +807,141 @@ class SubjectPerformanceData {
 }
 
 class ReminderNote {
+
   final String id;
+
   final String text;
+
   final bool completed;
 
+
+
   ReminderNote({
+
     required this.id,
+
     required this.text,
+
     required this.completed,
+
   });
 
+
+
   factory ReminderNote.fromJson(Map<String, dynamic> json) {
+
     return ReminderNote(
+
       id: json['id'],
+
       text: json['text'],
+
       completed: json['completed'],
+
     );
+
   }
 
+
+
   Map<String, dynamic> toJson() {
+
     return {
+
       'id': id,
+
       'text': text,
+
       'completed': completed,
+
     };
+
   }
+
+}
+
+
+
+class MasterSubject {
+
+  final int id;
+
+  final String name;
+
+
+
+  MasterSubject({required this.id, required this.name});
+
+
+
+  factory MasterSubject.fromMap(Map<String, dynamic> map) {
+
+    return MasterSubject(
+
+      id: map['id'],
+
+      name: map['name'],
+
+    );
+
+  }
+
+}
+
+
+
+class MasterTopic {
+
+  final int id;
+
+  final int masterSubjectId;
+
+  final String name;
+
+  final String? tecId;
+
+  final int? parentId;
+
+  List<MasterTopic> children;
+
+
+
+  MasterTopic({
+
+    required this.id,
+
+    required this.masterSubjectId,
+
+    required this.name,
+
+    this.tecId,
+
+    this.parentId,
+
+    this.children = const [],
+
+  });
+
+
+
+    factory MasterTopic.fromMap(Map<String, dynamic> map) {
+
+    return MasterTopic(
+
+      id: map['id'],
+
+      masterSubjectId: map['master_subject_id'],
+
+      name: map['name'],
+
+      tecId: map['tec_id'],
+
+      parentId: map['parent_id'],
+
+      children: [], // Inicializado como vazio, será populado depois
+
+    );
+
+  }
+
 }

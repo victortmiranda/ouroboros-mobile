@@ -1,26 +1,36 @@
 import 'package:flutter/material.dart';
-import 'package:ouroboros_mobile/models/simulado_record.dart';
-import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
-import 'package:ouroboros_mobile/providers/simulados_provider.dart';
-import 'package:ouroboros_mobile/providers/active_plan_provider.dart';
-import 'package:ouroboros_mobile/providers/all_subjects_provider.dart';
+import 'package:intl/intl.dart';
+import 'package:flutter/foundation.dart'; // Explicitly import foundation for ValueNotifier
 import 'package:uuid/uuid.dart';
+import 'package:ouroboros_mobile/models/data_models.dart'; // For SimuladoRecord and SimuladoSubject
+import 'package:ouroboros_mobile/providers/active_plan_provider.dart'; // For ActivePlanProvider
+import 'package:ouroboros_mobile/providers/all_subjects_provider.dart'; // For AllSubjectsProvider
+import 'package:ouroboros_mobile/providers/simulados_provider.dart'; // For SimuladosProvider
+import 'package:ouroboros_mobile/providers/auth_provider.dart'; // For AuthProvider
 
-class ListenableBuilder extends AnimatedWidget {
-  final Listenable listenable;
-  final Widget Function(BuildContext) builder;
+// Classe auxiliar para gerenciar o estado da UI de cada matéria do simulado
+class _SimuladoSubjectUI {
+  String? id; // ID do SimuladoSubject do banco de dados (se for edição)
+  String name;
+  ValueNotifier<num> weight;
+  ValueNotifier<int> totalQuestions;
+  ValueNotifier<int> correct;
+  ValueNotifier<int> incorrect;
+  String color;
 
-  const ListenableBuilder({
-    Key? key,
-    required this.listenable,
-    required this.builder,
-  }) : super(key: key, listenable: listenable);
-
-  @override
-  Widget build(BuildContext context) {
-    return builder(context);
-  }
+  _SimuladoSubjectUI({
+    this.id,
+    required this.name,
+    num weight = 1,
+    required int totalQuestions,
+    required int correct,
+    required int incorrect,
+    this.color = '#000000',
+  }) : this.weight = ValueNotifier(weight),
+       this.totalQuestions = ValueNotifier(totalQuestions),
+       this.correct = ValueNotifier(correct),
+       this.incorrect = ValueNotifier(incorrect);
 }
 
 class AddEditSimuladoScreen extends StatefulWidget {
@@ -40,7 +50,7 @@ class _AddEditSimuladoScreenState extends State<AddEditSimuladoScreen> {
   late String _banca;
   late String _timeSpent;
   late String _comments;
-  late List<SimuladoSubject> _subjects;
+  late List<_SimuladoSubjectUI> _subjects;
 
   @override
   void initState() {
@@ -49,18 +59,19 @@ class _AddEditSimuladoScreenState extends State<AddEditSimuladoScreen> {
     if (widget.simulado != null) {
       final s = widget.simulado!;
       _name = s.name;
-      _date = s.date;
-      _style = s.style;
-      _banca = s.banca;
-      _timeSpent = s.timeSpent;
-      _comments = s.comments;
+      _date = DateTime.parse(s.date); // Convert String date to DateTime
+      _style = s.style ?? 'Múltipla Escolha';
+      _banca = s.banca ?? '';
+      _timeSpent = s.time_spent ?? '00:00:00';
+      _comments = s.comments ?? '';
       _subjects = s.subjects
-          .map((sub) => SimuladoSubject(
-        name: sub.name,
-        weight: sub.weight.value,
-        totalQuestions: sub.totalQuestions.value,
-        correct: sub.correct.value,
-        incorrect: sub.incorrect.value,
+          .map((sub) => _SimuladoSubjectUI(
+        id: sub.id?.toString(), // Use o ID do sub, se existir
+        name: sub.subject_name,
+        weight: sub.weight,
+        totalQuestions: sub.total_questions,
+        correct: sub.correct,
+        incorrect: sub.incorrect,
         color: sub.color,
       ))
           .toList();
@@ -85,7 +96,7 @@ class _AddEditSimuladoScreenState extends State<AddEditSimuladoScreen> {
 
           setState(() {
             _subjects = planSubjects
-                .map((sub) => SimuladoSubject(
+                .map((sub) => _SimuladoSubjectUI(
               name: sub.subject,
               weight: 1,
               totalQuestions: 10, // Alterado de 0 para 10
@@ -291,7 +302,7 @@ class _AddEditSimuladoScreenState extends State<AddEditSimuladoScreen> {
   List<DataRow> _buildRows(bool isLandscape) {
     return _subjects.asMap().entries.map((entry) {
       final index = entry.key;
-      final subject = entry.value;
+      final _SimuladoSubjectUI subjectUI = entry.value;
 
       final rowColor = Theme.of(context).brightness == Brightness.dark
           ? (index.isOdd ? Colors.grey.shade900 : Colors.grey.shade800) // Cores para o modo escuro
@@ -313,12 +324,12 @@ class _AddEditSimuladoScreenState extends State<AddEditSimuladoScreen> {
             children: [
               Container(
                 width: 4,
-                color: Color(int.parse(subject.color.substring(1, 7), radix: 16) + 0xFF000000),
+                color: Color(int.parse(subjectUI.color.substring(1, 7), radix: 16) + 0xFF000000),
               ),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  subject.name,
+                  subjectUI.name,
                   softWrap: true,
                   textAlign: TextAlign.center,
                 ),
@@ -334,10 +345,10 @@ class _AddEditSimuladoScreenState extends State<AddEditSimuladoScreen> {
           ),
           child: Center(
             child: NumberField<num>(
-              notifier: subject.weight,
-              onDecrease: () => subject.weight.value = (subject.weight.value - 1).clamp(0, double.infinity),
-              onIncrease: () => subject.weight.value = (subject.weight.value + 1).clamp(0, double.infinity),
-              onChanged: (v) => subject.weight.value = num.tryParse(v) ?? 1,
+              notifier: subjectUI.weight,
+              onDecrease: () => subjectUI.weight.value = (subjectUI.weight.value - 1).clamp(0, double.infinity),
+              onIncrease: () => subjectUI.weight.value = (subjectUI.weight.value + 1).clamp(0, double.infinity),
+              onChanged: (v) => subjectUI.weight.value = num.tryParse(v) ?? 1,
               width: 100,
             ),
           ),
@@ -350,10 +361,10 @@ class _AddEditSimuladoScreenState extends State<AddEditSimuladoScreen> {
           ),
           child: Center(
             child: NumberField<int>(
-              notifier: subject.totalQuestions,
-              onDecrease: () => subject.totalQuestions.value = (subject.totalQuestions.value - 1).clamp(0, 999),
-              onIncrease: () => subject.totalQuestions.value = (subject.totalQuestions.value + 1).clamp(0, 999),
-              onChanged: (v) => subject.totalQuestions.value = int.tryParse(v) ?? 0,
+              notifier: subjectUI.totalQuestions,
+              onDecrease: () => subjectUI.totalQuestions.value = (subjectUI.totalQuestions.value - 1).clamp(0, 999),
+              onIncrease: () => subjectUI.totalQuestions.value = (subjectUI.totalQuestions.value + 1).clamp(0, 999),
+              onChanged: (v) => subjectUI.totalQuestions.value = int.tryParse(v) ?? 0,
               width: 100,
               isInt: true,
             ),
@@ -367,17 +378,17 @@ class _AddEditSimuladoScreenState extends State<AddEditSimuladoScreen> {
           ),
           child: Center(
             child: NumberField<int>(
-              notifier: subject.correct,
-              onDecrease: () => subject.correct.value = (subject.correct.value - 1).clamp(0, 999),
+              notifier: subjectUI.correct,
+              onDecrease: () => subjectUI.correct.value = (subjectUI.correct.value - 1).clamp(0, 999),
               onIncrease: () {
-                if (subject.correct.value + subject.incorrect.value < subject.totalQuestions.value) {
-                  subject.correct.value = (subject.correct.value + 1).clamp(0, 999);
+                if (subjectUI.correct.value + subjectUI.incorrect.value < subjectUI.totalQuestions.value) {
+                  subjectUI.correct.value = (subjectUI.correct.value + 1).clamp(0, 999);
                 }
               },
               onChanged: (v) {
                 final value = int.tryParse(v) ?? 0;
-                if (value + subject.incorrect.value <= subject.totalQuestions.value) {
-                  subject.correct.value = value;
+                if (value + subjectUI.incorrect.value <= subjectUI.totalQuestions.value) {
+                  subjectUI.correct.value = value;
                 }
               },
               width: 100,
@@ -393,17 +404,17 @@ class _AddEditSimuladoScreenState extends State<AddEditSimuladoScreen> {
           ),
           child: Center(
             child: NumberField<int>(
-              notifier: subject.incorrect,
-              onDecrease: () => subject.incorrect.value = (subject.incorrect.value - 1).clamp(0, 999),
+              notifier: subjectUI.incorrect,
+              onDecrease: () => subjectUI.incorrect.value = (subjectUI.incorrect.value - 1).clamp(0, 999),
               onIncrease: () {
-                if (subject.correct.value + subject.incorrect.value < subject.totalQuestions.value) {
-                  subject.incorrect.value = (subject.incorrect.value + 1).clamp(0, 999);
+                if (subjectUI.correct.value + subjectUI.incorrect.value < subjectUI.totalQuestions.value) {
+                  subjectUI.incorrect.value = (subjectUI.incorrect.value + 1).clamp(0, 999);
                 }
               },
               onChanged: (v) {
                 final value = int.tryParse(v) ?? 0;
-                if (value + subject.correct.value <= subject.totalQuestions.value) {
-                  subject.incorrect.value = value;
+                if (value + subjectUI.correct.value <= subjectUI.totalQuestions.value) {
+                  subjectUI.incorrect.value = value;
                 }
               },
               width: 100,
@@ -419,10 +430,10 @@ class _AddEditSimuladoScreenState extends State<AddEditSimuladoScreen> {
             decoration: BoxDecoration(
               border: Border(bottom: BorderSide(color: borderColor, width: 1.0)),
             ),
-            child: ListenableBuilder(
-              listenable: Listenable.merge([subject.totalQuestions, subject.correct, subject.incorrect]),
-              builder: (context) {
-                final blank = subject.totalQuestions.value - subject.correct.value - subject.incorrect.value;
+            child: AnimatedBuilder(
+              animation: Listenable.merge([subjectUI.totalQuestions, subjectUI.correct, subjectUI.incorrect]),
+              builder: (context, child) {
+                final blank = subjectUI.totalQuestions.value - subjectUI.correct.value - subjectUI.incorrect.value;
                 return Center(child: Text(blank.toString(), style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)));
               },
             ),
@@ -431,10 +442,10 @@ class _AddEditSimuladoScreenState extends State<AddEditSimuladoScreen> {
             decoration: BoxDecoration(
               border: Border(bottom: BorderSide(color: borderColor, width: 1.0)),
             ),
-            child: ListenableBuilder(
-              listenable: Listenable.merge([subject.correct, subject.weight]),
-              builder: (context) {
-                final points = subject.correct.value * subject.weight.value;
+            child: AnimatedBuilder(
+              animation: Listenable.merge([subjectUI.correct, subjectUI.weight]),
+              builder: (context, child) {
+                final points = subjectUI.correct.value * subjectUI.weight.value;
                 return Center(child: Text(points.toString(), style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.amber)));
               },
             ),
@@ -443,11 +454,11 @@ class _AddEditSimuladoScreenState extends State<AddEditSimuladoScreen> {
             decoration: BoxDecoration(
               border: Border(bottom: BorderSide(color: borderColor, width: 1.0)),
             ),
-            child: ListenableBuilder(
-              listenable: Listenable.merge([subject.correct, subject.totalQuestions]),
-              builder: (context) {
-                final performance = subject.totalQuestions.value > 0
-                    ? (subject.correct.value / subject.totalQuestions.value * 100).toStringAsFixed(1)
+            child: AnimatedBuilder(
+              animation: Listenable.merge([subjectUI.correct, subjectUI.totalQuestions]),
+              builder: (context, child) {
+                final performance = subjectUI.totalQuestions.value > 0
+                    ? (subjectUI.correct.value / subjectUI.totalQuestions.value * 100).toStringAsFixed(1)
                     : '0.0';
                 return Center(child: Text('$performance%', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue)));
               },
@@ -462,7 +473,7 @@ class _AddEditSimuladoScreenState extends State<AddEditSimuladoScreen> {
         ),
         child: IconButton(
           icon: const Icon(Icons.delete, color: Colors.red),
-          onPressed: () => setState(() => _subjects.remove(subject)),
+          onPressed: () => setState(() => _subjects.remove(subjectUI)),
         ),
       )));
 
@@ -477,22 +488,31 @@ class _AddEditSimuladoScreenState extends State<AddEditSimuladoScreen> {
     if (_formKey.currentState!.validate()) {
       _formKey.currentState!.save();
 
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      final activePlanId = Provider.of<ActivePlanProvider>(context, listen: false).activePlan?.id;
       final simulado = SimuladoRecord(
         id: widget.simulado?.id ?? const Uuid().v4(),
+        userId: authProvider.currentUser!.name,
+        plan_id: activePlanId!,
         name: _name,
-        date: _date,
-        style: _style,
+        date: DateFormat('yyyy-MM-dd').format(_date),
+        style: _style == 'Múltipla Escolha' ? 'multipla_escolha' : 'certo_errado',
         banca: _banca,
-        timeSpent: _timeSpent,
+        time_spent: _timeSpent,
         comments: _comments,
         subjects: _subjects.map((s) => SimuladoSubject(
-          name: s.name,
-          weight: s.weight.value,
-          totalQuestions: s.totalQuestions.value,
+          id: s.id != null ? int.tryParse(s.id!) : null, // Manter ID se existir
+          simulado_record_id: widget.simulado?.id ?? const Uuid().v4(), // Será preenchido pelo banco de dados
+          subject_id: s.id ?? const Uuid().v4(), // Usar o ID da UI como subject_id
+          subject_name: s.name,
+          weight: s.weight.value.toDouble(),
+          total_questions: s.totalQuestions.value,
           correct: s.correct.value,
           incorrect: s.incorrect.value,
           color: s.color,
+          lastModified: DateTime.now().millisecondsSinceEpoch,
         )).toList(),
+        lastModified: DateTime.now().millisecondsSinceEpoch,
       );
 
       final provider = Provider.of<SimuladosProvider>(context, listen: false);

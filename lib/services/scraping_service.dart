@@ -1,8 +1,6 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:ouroboros_mobile/models/data_models.dart';
-import 'package:uuid/uuid.dart';
 
 class ScrapingService {
   final Completer<Plan> _completer = Completer<Plan>();
@@ -14,17 +12,28 @@ class ScrapingService {
   List<Map<String, String>> _subjectLinks = [];
   List<Subject> _finalSubjects = [];
   int _subjectIndex = 0;
+  int _tempIdCounter = -1;
 
   Future<Plan> scrapeGuide(String url) {
     _initialUrl = url;
     _headlessWebView = HeadlessInAppWebView(
       initialUrlRequest: URLRequest(url: WebUri(url)),
       onWebViewCreated: (controller) {
-        print('HeadlessInAppWebView criado!');
+        // print('ScrapingService: HeadlessInAppWebView criado!');
+      },
+      onLoadStart: (controller, url) {
+        // print('ScrapingService: Iniciando carregamento de: $url');
       },
       onLoadStop: _onPageLoaded,
-      onLoadError: (controller, url, code, message) {
-        _completer.completeError('Erro ao carregar a página: $message');
+      onReceivedError: (controller, url, error) {
+        // print('ScrapingService: Erro ao carregar $url: Código ${error.type}, Mensagem: ${error.description}');
+        _completer.completeError('Erro ao carregar a página: ${error.description}');
+      },
+      onConsoleMessage: (controller, consoleMessage) {
+        // print('ScrapingService: WebView Console [${consoleMessage.messageLevel.toString().split('.').last}]: ${consoleMessage.message}');
+      },
+      onProgressChanged: (controller, progress) {
+        // print('ScrapingService: Progresso de carregamento: $progress%');
       },
     );
 
@@ -59,14 +68,14 @@ class ScrapingService {
     // Extrai os dados do cabeçalho
     String getHeaderJs = """
       (function() {
-        let name = document.querySelector('div.guias-cabecalho-concurso-nome')?.textContent?.trim() || 
-                   document.querySelector('div.detalhes-cabecalho-informacoes-texto h1 span:not([class])')?.textContent?.trim() || 
+        let name = document.querySelector('div.guias-cabecalho-concurso-nome')?.textContent?.trim() ||
+                   document.querySelector('div.detalhes-cabecalho-informacoes-texto h1 span:not([class])')?.textContent?.trim() ||
                    document.title.split('-')[0].trim();
-        let cargo = document.querySelector('div.guias-cabecalho-concurso-cargo')?.textContent?.trim() || 
+        let cargo = document.querySelector('div.guias-cabecalho-concurso-cargo')?.textContent?.trim() ||
                     document.querySelector('div.detalhes-cabecalho-informacoes-orgao')?.textContent?.trim() || '';
         let edital = document.querySelector('div.guias-cabecalho-concurso-edital')?.textContent?.trim() || '';
-        let iconUrl = document.querySelector('div.guias-cabecalho-logo img')?.getAttribute('src') || 
-                      document.querySelector('div.detalhes-cabecalho-logotipo img')?.getAttribute('src') || 
+        let iconUrl = document.querySelector('div.guias-cabecalho-logo img')?.getAttribute('src') ||
+                      document.querySelector('div.detalhes-cabecalho-logotipo img')?.getAttribute('src') ||
                       document.querySelector('img[alt*="logotipo"]')?.getAttribute('src') || '';
         let banca = '';
         const bancaLabel = Array.from(document.querySelectorAll('span.detalhes-campos')).find(el => el.textContent?.trim() === 'Banca');
@@ -127,79 +136,127 @@ class ScrapingService {
   }
 
   Future<void> _extractTopics(InAppWebViewController controller) async {
-    await _waitForSelector(controller, 'div.caderno-guia-arvore-indice ul');
+    // Aguarda a árvore aparecer
+    await _waitForSelector(
+      controller,
+      'div.caderno-guia-arvore-indice ul, div.guia-arvore-indice ul',
+      timeout: 60000,
+    );
 
-    String getTopicsJs = """
-      (function() {
-        const processLis = (ulElement) => {
-            const topics = [];
-            if (!ulElement) return topics;
-            Array.from(ulElement.children).forEach(child => {
-                if (child.tagName !== 'LI') return;
-                const span = child.querySelector(':scope > span');
-                const topicText = span?.textContent?.trim();
-                if (!topicText) return;
+    // Delay crítico: muitos sites (especialmente Estratégia) carregam os números via AJAX depois
+    await Future.delayed(const Duration(milliseconds: 3000));
 
-                const questionCountEl = child.querySelector('span.capitulo-questoes > span');
-                let questionCount = 0;
-                if (questionCountEl) {
-                    const text = questionCountEl.textContent?.trim().toLowerCase();
-                    if (text === 'uma questão') questionCount = 1;
-                    else if (text) {
-                        const match = text.match(/(\d+)/);
-                        if (match) questionCount = parseInt(match[1], 10);
-                    }
-                }
+    final String getTopicsJs = """
+    (function() {
+      const processLevel = (ul) => {
+        if (!ul) return [];
+        const items = [];
 
-                const subUl = child.nextElementSibling;
-                const sub_topics = (subUl && subUl.tagName === 'UL') ? processLis(subUl) : [];
-                
-                topics.push({ 
-                    topic_text: topicText, 
-                    sub_topics: sub_topics, 
-                    question_count: questionCount, 
-                    is_grouping_topic: sub_topics.length > 0 
-                });
-            });
-            return topics;
-        };
-        const mainTreeContainer = document.querySelector('div.caderno-guia-arvore-indice ul');
-        return processLis(mainTreeContainer);
-      })();
-    """;
+        const directLis = ul.querySelectorAll(':scope > li');
+        directLis.forEach(li => {
+          // Nome do tópico
+          const span = li.querySelector(':scope > span:not(.capitulo-questoes)');
+          const text = span?.textContent?.trim() || 'Tópico sem nome';
+          
+          // Defina a contagem de perguntas como 0, conforme solicitado
+          const questionCount = 0;
 
-    final topicsResult = await controller.evaluateJavascript(source: getTopicsJs) as List<dynamic>;
+          // Subtópicos
+          const subUl = li.querySelector(':scope > ul');
+          const subTopics = subUl ? processLevel(subUl) : [];
 
-    print('ScrapingService: Raw topicsResult for subject ${_subjectLinks[_subjectIndex - 1]['name']}: $topicsResult');
-    if (topicsResult.isEmpty) {
-      print('ScrapingService: WARNING - topicsResult is empty for subject ${_subjectLinks[_subjectIndex - 1]['name']}');
+          items.push({
+            topic_text: text,
+            question_count: questionCount,
+            sub_topics: subTopics,
+            is_grouping_topic: subTopics.length > 0
+          });
+        });
+
+        return items;
+      };
+
+      const root = document.querySelector('div.caderno-guia-arvore-indice ul, div.guia-arvore-indice ul, ul.arvore-indice');
+      if (!root) {
+        // console.log('Árvore de tópicos NÃO encontrada!');
+        return [];
+      }
+
+      const result = processLevel(root);
+      return result;
+    })();
+  """;
+
+    dynamic topicsResult;
+    try {
+      topicsResult = await controller.evaluateJavascript(source: getTopicsJs);
+    } catch (e) {
+      // print('Erro ao executar JS de extração de tópicos: $e');
+      topicsResult = [];
     }
 
-    final subjectLink = _subjectLinks[_subjectIndex - 1];
-    final List<Topic> topics = topicsResult.map((topicMap) => Topic.fromMap(topicMap)).toList();
+    if (topicsResult == null || (topicsResult is List && topicsResult.isEmpty)) {
+      // print('AVISO: Nenhum tópico extraído para a matéria: ${_subjectLinks[_subjectIndex - 1]['name']}');
+      topicsResult = [];
+    }
 
-    _finalSubjects.add(Subject(
-      id: const Uuid().v4(),
-      plan_id: '', // Será preenchido depois
-      subject: subjectLink['name']!,
-      color: '#ef4444', // Cor placeholder
-      topics: topics,
-      total_topics_count: topics.length, // Simplificado, a lógica de contagem recursiva pode ser adicionada depois
-    ));
+    List<Topic> flattenTopics(List<dynamic> nodes, {int? parentId}) {
+      List<Topic> list = [];
+
+      for (var node in nodes) {
+        final map = Map<String, dynamic>.from(node);
+        final topicId = _tempIdCounter--;
+        final topic = Topic(
+          id: topicId,
+          subject_id: '', // será preenchido depois
+          topic_text: map['topic_text'] ?? 'Sem nome',
+          parent_id: parentId,
+          question_count: (map['question_count'] as num?)?.toInt() ?? 0,
+          is_grouping_topic: map['is_grouping_topic'] == true,
+          userWeight: null,
+          lastModified: DateTime.now().millisecondsSinceEpoch,
+        );
+
+        list.add(topic);
+
+        if (map['sub_topics'] is List && (map['sub_topics'] as List).isNotEmpty) {
+          list.addAll(flattenTopics(map['sub_topics'], parentId: topic.id));
+        }
+      }
+      return list;
+    }
+
+    final List<Topic> allTopics = flattenTopics(topicsResult);
+
+    // print("MATÉRIA: ${_subjectLinks[_subjectIndex - 1]['name']} → ${allTopics.length} tópicos salvos (com subtópicos)");
+
+    final subject = Subject(
+      id: (_tempIdCounter--).toString(),
+      plan_id: '',
+      subject: _subjectLinks[_subjectIndex - 1]['name']!,
+      color: '#ef4444',
+      topics: allTopics,
+      total_topics_count: allTopics.length,
+      lastModified: DateTime.now().millisecondsSinceEpoch,
+    );
+
+    _finalSubjects.add(subject);
   }
 
   void _finishScraping() {
-    final planId = const Uuid().v4();
+    final planId = (_tempIdCounter--).toString();
+    final now = DateTime.now().millisecondsSinceEpoch;
 
-    // Atribuir o plan_id correto a cada matéria
-    final subjectsWithPlanId = _finalSubjects.map((s) => Subject(
-      id: s.id,
-      plan_id: planId,
-      subject: s.subject,
-      color: s.color,
-      topics: s.topics,
-      total_topics_count: s.total_topics_count,
-    )).toList();
+    final subjectsWithPlanId = _finalSubjects.map((s) {
+      final subjectId = s.id;
+      final topicsWithSubjectId = s.topics.map((t) => t.copyWith(subject_id: subjectId)).toList();
+      
+      return s.copyWith(
+        plan_id: planId,
+        topics: topicsWithSubjectId,
+        lastModified: now
+      );
+    }).toList();
 
     final plan = Plan(
       id: planId,
@@ -209,6 +266,7 @@ class ScrapingService {
       banca: _headerData['banca'],
       iconUrl: _headerData['iconUrl'],
       subjects: subjectsWithPlanId,
+      lastModified: now,
     );
     _completer.complete(plan);
     _headlessWebView.dispose();

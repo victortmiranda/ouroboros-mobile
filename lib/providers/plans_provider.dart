@@ -89,6 +89,7 @@ class PlansProvider with ChangeNotifier {
       edital: edital,
       banca: banca,
       iconUrl: iconUrl,
+      lastModified: DateTime.now().millisecondsSinceEpoch,
     );
     
     _setLoading(true);
@@ -101,7 +102,8 @@ class PlansProvider with ChangeNotifier {
   Future<void> updatePlan(Plan plan) async {
     if (_authProvider?.currentUser == null) return;
     _setLoading(true);
-    await _dbService.updatePlan(plan, _authProvider!.currentUser!.name);
+    final updatedPlan = plan.copyWith(lastModified: DateTime.now().millisecondsSinceEpoch);
+    await _dbService.updatePlan(updatedPlan, _authProvider!.currentUser!.name);
     await fetchPlans(); // Refresh the list and stats
   }
 

@@ -69,7 +69,16 @@ class _FloatingStopwatchButtonState extends State<FloatingStopwatchButton> with 
   }
 
   @override
+  void dispose() {
+    _animationController?.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    if (_position == null) {
+      return const SizedBox.shrink();
+    }
     final screenSize = MediaQuery.of(context).size;
 
     return Positioned(
@@ -161,7 +170,9 @@ class _FloatingStopwatchButtonState extends State<FloatingStopwatchButton> with 
                           plan_id: activePlanProvider.activePlan!.id,
                           date: DateTime.now().toIso8601String(),
                           subject_id: subjectId!,
-                          topic: topic?.topic_text ?? '',
+                          // Agora usa topic_texts e topic_ids como listas
+                          topic_texts: topic != null ? [topic.topic_text] : [],
+                          topic_ids: topic != null ? [topic.id.toString()] : [],
                           study_time: time,
                           category: 'teoria',
                           questions: {},
@@ -170,6 +181,7 @@ class _FloatingStopwatchButtonState extends State<FloatingStopwatchButton> with 
                           count_in_planning: true,
                           pages: [],
                           videos: [],
+                          lastModified: DateTime.now().millisecondsSinceEpoch,
                         );
                         
                         showModalBottomSheet(

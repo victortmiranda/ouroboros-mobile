@@ -39,6 +39,11 @@ class _CycleCreationScreenState extends State<CycleCreationScreen> {
   final _manualDurationController = TextEditingController();
   final _manualQuestionsGoalController = TextEditingController(text: '250');
   final _subjectSearchController = TextEditingController();
+
+  final ScrollController _subjectSelectionController = ScrollController();
+  final ScrollController _subjectSettingsController = ScrollController();
+  final ScrollController _manualSessionsController = ScrollController();
+
   @override
   void initState() {
     super.initState();
@@ -57,6 +62,9 @@ class _CycleCreationScreenState extends State<CycleCreationScreen> {
     _manualWorkloadController.dispose();
     _manualGuidedQuestionsGoalController.dispose();
     _manualSessionDurationController.dispose();
+    _subjectSelectionController.dispose();
+    _subjectSettingsController.dispose();
+    _manualSessionsController.dispose();
     super.dispose();
   }
 
@@ -297,8 +305,10 @@ class _CycleCreationScreenState extends State<CycleCreationScreen> {
               SizedBox(
                 height: 420, // Adjust height as needed
                 child: Scrollbar(
+                  controller: _subjectSelectionController,
                   thumbVisibility: true,
                   child: GridView.builder(
+                    controller: _subjectSelectionController,
                     gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: 2,
                       childAspectRatio: 3 / 1.2,
@@ -377,18 +387,28 @@ class _CycleCreationScreenState extends State<CycleCreationScreen> {
                   builder: (BuildContext buttonContext) {
                     return ElevatedButton.icon(
                       onPressed: () async {
-                        final provider = Provider.of<AllSubjectsProvider>(buttonContext, listen: false);
-                        if (!mounted) return;
-
-                        _scaffoldMessengerKey.currentState?.showSnackBar(
-                          const SnackBar(content: Text('Calculando pesos...')),
-                        );
+                        if (_selectedSubjects.isEmpty) {
+                          _scaffoldMessengerKey.currentState?.showSnackBar(
+                            const SnackBar(
+                              content: Text('Selecione pelo menos uma matéria para calcular os pesos.'),
+                              backgroundColor: Colors.orange,
+                            ),
+                          );
+                          return;
+                        }
 
                         try {
-                          await provider.calculateAndApplyTopicWeights(_selectedSubjects.toList());
-                          if (!mounted) return;
+                          _scaffoldMessengerKey.currentState?.showSnackBar(
+                            const SnackBar(
+                              content: Text('Calculando pesos por banca...'),
+                              backgroundColor: Colors.teal,
+                            ),
+                          );
 
-                          _scaffoldMessengerKey.currentState?.hideCurrentSnackBar();
+                          await allSubjectsProvider.calculateAndApplyTopicWeights(
+                            _selectedSubjects.toList(),
+                          );
+
                           _scaffoldMessengerKey.currentState?.showSnackBar(
                             const SnackBar(
                               content: Text('Pesos calculados e aplicados com sucesso!'),
@@ -396,8 +416,6 @@ class _CycleCreationScreenState extends State<CycleCreationScreen> {
                             ),
                           );
                         } catch (e) {
-                          if (!mounted) return;
-                          _scaffoldMessengerKey.currentState?.hideCurrentSnackBar();
                           _scaffoldMessengerKey.currentState?.showSnackBar(
                             SnackBar(
                               content: Text('Erro ao calcular pesos: $e'),
@@ -418,9 +436,11 @@ class _CycleCreationScreenState extends State<CycleCreationScreen> {
                 const SizedBox(height: 10),
                               Expanded(
                                 child: Scrollbar(
+                                  controller: _subjectSettingsController,
                                   thumbVisibility: true,
                 
-                                  child: GridView.builder(                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                                  child: GridView.builder(    
+                                    controller: _subjectSettingsController,                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: 2,
                         crossAxisSpacing: 8,
                         mainAxisSpacing: 8,
@@ -1241,9 +1261,11 @@ class _CycleCreationScreenState extends State<CycleCreationScreen> {
                 : SizedBox(
                     height: 150,
                     child: Scrollbar( // Adicionado Scrollbar
+                      controller: _manualSessionsController,
                       thumbVisibility: true,
 
                       child: ListView.builder(
+                        controller: _manualSessionsController,
                         itemCount: _manualStudySessions.length,
                         itemBuilder: (context, index) {
                           final session = _manualStudySessions[index];

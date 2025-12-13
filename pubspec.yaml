@@ -19,7 +19,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 version: 1.0.1+1
 
 environment:
-  sdk: ^3.9.2
+  sdk: ^3.10.3
 
 # Dependencies specify other packages that your package needs in order to work.
 # To automatically upgrade your package dependencies to the latest versions
@@ -36,7 +36,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   flutter_vector_icons: ^2.0.0
   provider: ^6.1.2
-  intl: ^0.19.0
+  intl: ^0.20.2
   sqflite: ^2.4.2
   path_provider: ^2.1.5
   uuid: ^4.5.1
@@ -48,20 +48,25 @@ dependencies:
   fl_chart: ^1.1.1
   file_picker: ^10.3.6
   flutter_svg: ^2.2.2
-  permission_handler: ^11.3.1
+  permission_handler: ^12.0.1
   image: ^4.5.4
+
+  qr_flutter: ^4.1.0
+  mobile_scanner: ^5.1.0
+  network_info_plus: ^5.0.3
+  multicast_dns: ^0.3.2
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_launcher_icons: ^0.13.1
+  flutter_launcher_icons: ^0.14.4
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
   # activated in the `analysis_options.yaml` file located at the root of your
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
-  flutter_lints: ^5.0.0
+  flutter_lints: ^6.0.0
 
 flutter_launcher_icons:
   android: true
@@ -70,32 +75,33 @@ flutter_launcher_icons:
   remove_alpha_ios: true
   adaptive_icon_background: "#009688"
 
-# For information on the generic Dart part of this file, see the
-# following page: https://dart.dev/tools/pub/pubspec
+# Para informações sobre a parte genérica Dart deste arquivo, veja a
+# seguinte página: https://dart.dev/tools/pub/pubspec
 
-# The following section is specific to Flutter packages.
+# A seguinte seção é específica para pacotes Flutter.
 flutter:
 
-  # The following line ensures that the Material Icons font is
-  # included with your application, so that you can use the icons in
-  # the material Icons class.
+  # A linha a seguir garante que a fonte Material Icons seja
+  # incluída com seu aplicativo, para que você possa usar os ícones em
+  # a classe Material Icons.
   uses-material-design: true
 
-  # To add assets to your application, add an assets section, like this:
+  # Para adicionar assets ao seu aplicativo, adicione uma seção de assets, como esta:
   assets:
     - logo/
+    - assets/data/
 
-  # An image asset can refer to one or more resolution-specific "variants", see
+  # Um asset de imagem pode se referir a uma ou mais "variantes" específicas de resolução, veja
   # https://flutter.dev/to/resolution-aware-images
 
-  # For details regarding adding assets from package dependencies, see
+  # Para detalhes sobre como adicionar assets de dependências de pacotes, veja
   # https://flutter.dev/to/asset-from-package
 
-  # To add custom fonts to your application, add a fonts section here,
-  # in this "flutter" section. Each entry in this list should have a
-  # "family" key with the font family name, and a "fonts" key with a
-  # list giving the asset and other descriptors for the font. For
-  # example:
+  # Para adicionar fontes personalizadas ao seu aplicativo, adicione uma seção de fontes aqui,
+  # nesta seção "flutter". Cada entrada nesta lista deve ter uma
+  # chave "family" com o nome da família da fonte, e uma chave "fonts" com uma
+  # lista contendo o asset e outros descritores para a fonte. Por
+  # exemplo:
   # fonts:
   #   - family: Schyler
   #     fonts:
@@ -108,5 +114,9 @@ flutter:
   #       - asset: fonts/TrajanPro_Bold.ttf
   #         weight: 700
   #
-  # For details regarding fonts from package dependencies,
-  # see https://flutter.dev/to/font-from-package
+  # Para detalhes sobre fontes de dependências de pacotes,
+  # veja https://flutter.dev/to/font-from-package
+
+
+
+

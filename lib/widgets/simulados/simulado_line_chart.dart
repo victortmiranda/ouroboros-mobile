@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
-import 'package:ouroboros_mobile/models/simulado_record.dart';
+import 'package:ouroboros_mobile/models/data_models.dart';
 
 class SimuladoLineChart extends StatelessWidget {
   final List<SimuladoRecord> simulados;
@@ -11,6 +11,22 @@ class SimuladoLineChart extends StatelessWidget {
     required this.simulados,
     required this.chartType,
   }) : super(key: key);
+
+  double _getPerformance(SimuladoRecord simulado) {
+    final totalCorrect = simulado.subjects.fold(0, (sum, s) => sum + s.correct);
+    final totalQuestions = simulado.subjects.fold(0, (sum, s) => sum + s.total_questions);
+    return totalQuestions > 0 ? (totalCorrect / totalQuestions) * 100 : 0.0;
+  }
+
+  double _getTotalScore(SimuladoRecord simulado) {
+    return simulado.subjects.fold(0.0, (sum, sub) {
+      if (simulado.style == 'certo_errado') {
+        return sum + (sub.correct - sub.incorrect);
+      } else {
+        return sum + (sub.correct * sub.weight);
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -23,11 +39,15 @@ class SimuladoLineChart extends StatelessWidget {
     final List<FlSpot> spots = simulados.asMap().entries.map((entry) {
       final index = entry.key;
       final simulado = entry.value;
-      final value = chartType == 'desempenho' ? simulado.performance : simulado.totalScore;
+      final value = chartType == 'desempenho' ? _getPerformance(simulado) : _getTotalScore(simulado);
       return FlSpot(index.toDouble(), value.toDouble());
     }).toList();
 
-    final List<String> labels = simulados.map((s) => '${s.date.day}/${s.date.month}').toList();
+
+    final List<String> labels = simulados.map((s) {
+      final dateTime = DateTime.parse(s.date);
+      return '${dateTime.day}/${dateTime.month}';
+    }).toList();
 
     return LineChart(
       LineChartData(

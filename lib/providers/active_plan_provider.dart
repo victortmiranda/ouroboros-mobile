@@ -83,4 +83,8 @@ class ActivePlanProvider with ChangeNotifier {
     _activePlan = null;
     notifyListeners();
   }
+
+  Future<void> refreshActivePlan() async {
+    await _loadActivePlan();
+  }
 }

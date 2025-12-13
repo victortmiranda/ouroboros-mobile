@@ -45,5 +45,15 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+
+	<!-- Permissões para Nearby Connections -->
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Ouroboros usa Bluetooth para encontrar e se conectar a dispositivos próximos para sincronização de dados.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_ouro._tcp</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Ouroboros usa a rede local para descobrir e transferir dados entre seus dispositivos.</string>
 </dict>
 </plist>

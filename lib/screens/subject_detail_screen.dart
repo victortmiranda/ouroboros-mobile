@@ -222,7 +222,8 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
 
   int _countStudiedTopics(List<Topic> topics, List<StudyRecord> records) {
     int count = 0;
-    final studiedTopicTexts = records.map((r) => r.topic).toSet();
+    // Coleta todos os topic_texts de todos os records e os transforma em um Set<String>
+    final studiedTopicTexts = records.expand((r) => r.topic_texts).toSet();
     for (final topic in topics) {
       if (studiedTopicTexts.contains(topic.topic_text)) {
         count++;
@@ -242,7 +243,8 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
           topic: topic,
           depth: depth,
           isInitiallyExpanded: _allTopicsExpanded,
-          studiedTopicTexts: records.map((r) => r.topic).toSet(),
+          // Coleta todos os topic_texts de todos os records e os transforma em um Set<String>
+          studiedTopicTexts: records.expand((r) => r.topic_texts).toSet(), // Corrigido aqui
           onAdd: (Topic topic) => _openStudyRegisterModal(topic: topic),
         ),
       );
@@ -360,7 +362,9 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  record.topic,
+                  record.topic_texts.isNotEmpty
+                      ? record.topic_texts.join(', ')
+                      : 'N/A', // Exibe todos os tópicos ou 'N/A'
                   style: const TextStyle(fontSize: 14, color: Colors.black87),
                 ),
                 const SizedBox(height: 4),

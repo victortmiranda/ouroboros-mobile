@@ -373,7 +373,8 @@ class _ReviewRecordCard extends StatelessWidget {
           plan_id: '',
           date: DateTime.now().toIso8601String(),
           subject_id: '',
-          topic: 'Tópico não encontrado',
+          topic_texts: ['Tópico não encontrado'], // Alterado
+          topic_ids: [], // Adicionado
           study_time: 0,
           category: 'revisao',
           questions: {},
@@ -382,6 +383,7 @@ class _ReviewRecordCard extends StatelessWidget {
           count_in_planning: false,
           pages: [],
           videos: [],
+          lastModified: DateTime.now().millisecondsSinceEpoch,
         );
       },
     );
@@ -396,7 +398,7 @@ class _ReviewRecordCard extends StatelessWidget {
 
       // Lógica para encontrar o registro de estudo que EFETIVAMENTE completou a revisão.
       final completionRecords = studyRecords.where((sr) {
-        if (sr.topic != reviewRecord.topic || sr.subject_id != studyRecord.subject_id || sr.category != 'revisao') {
+        if (!reviewRecord.topics.any((reviewTopic) => sr.topic_texts.contains(reviewTopic)) || sr.subject_id != studyRecord.subject_id || sr.category != 'revisao') {
           return false;
         }
         // Compara apenas a parte da data (ano, mês, dia), ignorando a hora.
@@ -444,7 +446,13 @@ class _ReviewRecordCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(subjectName, style: Theme.of(context).textTheme.titleMedium),
-                      Text(recordToDisplay.topic, style: Theme.of(context).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.bold)),
+                      // Exibe os tópicos como uma lista concatenada, ou 'N/A' se vazio
+                      Text(
+                        recordToDisplay.topic_texts.isNotEmpty
+                            ? recordToDisplay.topic_texts.join(', ')
+                            : 'N/A',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.bold),
+                      ),
                       const SizedBox(height: 4),
                       Text(
                         'Concluída em: ${DateFormat('dd/MM/yyyy').format(completedDate)}',
@@ -559,7 +567,7 @@ class _ReviewRecordCard extends StatelessWidget {
                       children: [
                         buildDatePill(context, DateTime.parse(reviewRecord.scheduled_date).toUtc()),
                         const SizedBox(width: 8),
-                        Expanded(child: Text(reviewRecord.topic)),
+                        Expanded(child: Text(reviewRecord.topics.join(', '))),
                         const SizedBox(width: 8),
                         Chip(
                           label: Text(categoryDisplayMap[_getStudyCategoryFromString(studyRecord.category)] ?? 'N/A'),
@@ -651,7 +659,7 @@ class _ReviewRecordCard extends StatelessWidget {
                   }
 
                   final subject = allSubjectsProvider.subjects.firstWhereOrNull((s) => s.id == studyRecord.subject_id);
-                  final topic = subject != null ? _findTopicByText(subject.topics, reviewRecord.topic) : null;
+                  final topic = subject != null && reviewRecord.topics.isNotEmpty ? _findTopicByText(subject.topics, reviewRecord.topics.first) : null;
 
                   stopwatchProvider.setContext(
                     planId: planId,
@@ -677,7 +685,8 @@ class _ReviewRecordCard extends StatelessWidget {
                         plan_id: planId,
                         date: DateTime.now().toIso8601String().split('T')[0],
                         subject_id: subjectId,
-                        topic: topic.topic_text,
+                        topic_texts: topic != null ? [topic.topic_text] : [], // Alterado
+                        topic_ids: topic != null ? [topic.id.toString()] : [],   // Adicionado
                         study_time: time,
                         category: 'revisao',
                         questions: {},
@@ -686,6 +695,7 @@ class _ReviewRecordCard extends StatelessWidget {
                         count_in_planning: true,
                         pages: [],
                         videos: [],
+                        lastModified: DateTime.now().millisecondsSinceEpoch,
                       );
 
                       showModalBottomSheet(
@@ -730,7 +740,8 @@ class _ReviewRecordCard extends StatelessWidget {
                     plan_id: planId,
                     date: DateTime.now().toIso8601String().split('T')[0],
                     subject_id: studyRecord.subject_id!, // Agora seguro por causa da verificação acima
-                    topic: reviewRecord.topic,
+                    topic_texts: reviewRecord.topics, // Já é uma lista de Strings
+                    topic_ids: [], // Adicionado (reviewRecord.topic não tem ID facilmente acessível aqui)
                     study_time: 0, // Será preenchido no modal
                     category: 'revisao',
                     questions: {},
@@ -739,6 +750,7 @@ class _ReviewRecordCard extends StatelessWidget {
                     count_in_planning: true,
                     pages: [],
                     videos: [],
+                    lastModified: DateTime.now().millisecondsSinceEpoch,
                   );
 
                   await showModalBottomSheet(

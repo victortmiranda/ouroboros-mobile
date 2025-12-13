@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:ouroboros_mobile/models/simulado_record.dart';
+import 'package:ouroboros_mobile/models/data_models.dart';
 import 'package:provider/provider.dart';
 import 'package:ouroboros_mobile/providers/simulados_provider.dart';
 import 'package:ouroboros_mobile/widgets/simulados/simulado_card.dart';
@@ -17,6 +17,41 @@ class SimuladosScreen extends StatefulWidget {
 
 class _SimuladosScreenState extends State<SimuladosScreen> {
   String _chartType = 'desempenho';
+
+  int _getTotalCorrect(SimuladoRecord simulado) {
+    return simulado.subjects.fold(0, (sum, s) => sum + s.correct);
+  }
+
+  int _getTotalIncorrect(SimuladoRecord simulado) {
+    return simulado.subjects.fold(0, (sum, s) => sum + s.incorrect);
+  }
+
+  int _getTotalQuestions(SimuladoRecord simulado) {
+    return simulado.subjects.fold(0, (sum, s) => sum + s.total_questions);
+  }
+
+  int _getTotalBlank(SimuladoRecord simulado) {
+    final total = _getTotalQuestions(simulado);
+    final correct = _getTotalCorrect(simulado);
+    final incorrect = _getTotalIncorrect(simulado);
+    return total - correct - incorrect;
+  }
+
+  double _getPerformance(SimuladoRecord simulado) {
+    final total = _getTotalQuestions(simulado);
+    final correct = _getTotalCorrect(simulado);
+    return total > 0 ? (correct / total) * 100 : 0.0;
+  }
+
+  double _getTotalScore(SimuladoRecord simulado) {
+    return simulado.subjects.fold(0.0, (sum, sub) {
+      if (simulado.style == 'certo_errado') { // Comparar com a string correta
+        return sum + (sub.correct - sub.incorrect);
+      } else {
+        return sum + (sub.correct * sub.weight);
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -83,9 +118,9 @@ class _SimuladosScreenState extends State<SimuladosScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceAround,
                       children: [
-                        _buildStatColumn('Acertos', latestSimulado.totalCorrect.toString(), Colors.green),
-                        _buildStatColumn('Erros', latestSimulado.totalIncorrect.toString(), Colors.red),
-                        _buildStatColumn('Brancos', latestSimulado.totalBlank.toString(), Colors.grey),
+                      _buildStatColumn('Acertos', _getTotalCorrect(latestSimulado).toString(), Colors.green),
+                        _buildStatColumn('Erros', _getTotalIncorrect(latestSimulado).toString(), Colors.red),
+                        _buildStatColumn('Brancos', _getTotalBlank(latestSimulado).toString(), Colors.grey),
                       ],
                     ),
                   ],

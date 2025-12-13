@@ -90,7 +90,13 @@ class BackupData {
   factory BackupData.fromMap(Map<String, dynamic> map) {
     return BackupData(
       plans: List<Plan>.from(map['plans']?.map((x) => Plan.fromMap(x)) ?? []),
-      subjects: List<Subject>.from(map['subjects']?.map((x) => Subject.fromMap(x, (x['topics'] as List<dynamic>).map((t) => Topic.fromMap(t)).toList())) ?? []),
+      subjects: List<Subject>.from(map['subjects']?.map((x) {
+        // Extrai a lista de tópicos e reconstrói a hierarquia
+        List<Topic> hierarchicalTopics = (x['topics'] as List<dynamic>?)
+            ?.map((t) => Topic.fromBackupMap(t))
+            .toList() ?? [];
+        return Subject.fromMap(x, hierarchicalTopics);
+      }) ?? []),
       studyRecords: List<StudyRecord>.from(map['studyRecords']?.map((x) => StudyRecord.fromMap(x)) ?? []),
       reviewRecords: List<ReviewRecord>.from(map['reviewRecords']?.map((x) => ReviewRecord.fromMap(x)) ?? []),
       simuladoRecords: List<SimuladoRecord>.from(map['simuladoRecords']?.map((x) => SimuladoRecord.fromMap(x, (x['subjects'] as List<dynamic>).map((s) => SimuladoSubject.fromMap(s)).toList())) ?? []),
@@ -100,5 +106,28 @@ class BackupData {
         ) ?? {},
       ),
     );
+  }
+
+  static List<Topic> _buildTopicHierarchy(List<Topic> flatTopics) {
+    final Map<int, Topic> topicMap = {};
+    for (var topic in flatTopics) {
+      if (topic.id != null) {
+        topicMap[topic.id!] = topic.copyWith(sub_topics: []); // Initialize sub_topics
+      }
+    }
+
+    final List<Topic> rootTopics = [];
+    for (var topic in flatTopics) {
+      if (topic.parent_id == null) {
+        rootTopics.add(topicMap[topic.id!] ?? topic);
+      } else {
+        final parent = topicMap[topic.parent_id!];
+        if (parent != null) {
+          parent.sub_topics ??= [];
+          parent.sub_topics!.add(topicMap[topic.id!] ?? topic);
+        }
+      }
+    }
+    return rootTopics;
   }
 }

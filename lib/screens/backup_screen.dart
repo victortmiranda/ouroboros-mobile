@@ -15,8 +15,10 @@ import 'package:ouroboros_mobile/providers/all_subjects_provider.dart';
 import 'package:ouroboros_mobile/providers/history_provider.dart';
 import 'package:ouroboros_mobile/providers/review_provider.dart';
 import 'package:ouroboros_mobile/widgets/confirmation_modal.dart';
+import 'package:ouroboros_mobile/widgets/catalog_import_loading_screen.dart';
+import 'package:ouroboros_mobile/screens/sync_screen.dart';
 
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:shared_preferences/shared_preferences.dart'; // Necessário para o DatabaseService
 
 class BackupScreen extends StatefulWidget {
   const BackupScreen({super.key});
@@ -43,51 +45,7 @@ class _BackupScreenState extends State<BackupScreen> {
         throw Exception('Usuário não encontrado.');
       }
 
-      final db = DatabaseService.instance;
-      final prefs = await SharedPreferences.getInstance();
-
-      // 1. Coletar dados do banco de dados
-      final plans = await db.readAllPlans(userId);
-      final subjects = await db.readAllSubjects(userId);
-      final studyRecords = await db.readStudyRecordsForUser(userId);
-      final reviewRecords = await db.getAllReviewRecords(userId);
-      final simuladoRecords = await db.readAllSimuladoRecordsForUser(userId);
-
-      // 2. Coletar dados de planejamento do SharedPreferences para cada plano
-      final planningDataPerPlan = <String, PlanningBackupData>{};
-      for (final plan in plans) {
-        final planId = plan.id;
-        final studyCycleString = prefs.getString('${userId}_studyCycle_$planId');
-        final planningData = PlanningBackupData(
-          studyCycle: studyCycleString != null
-              ? (jsonDecode(studyCycleString) as List).map((item) => StudySession.fromJson(item)).toList()
-              : null,
-          completedCycles: prefs.getInt('${userId}_completedCycles_$planId') ?? 0,
-          currentProgressMinutes: prefs.getInt('${userId}_currentProgressMinutes_$planId') ?? 0,
-          sessionProgressMap: prefs.getString('${userId}_sessionProgressMap_$planId') != null
-              ? Map<String, int>.from(jsonDecode(prefs.getString('${userId}_sessionProgressMap_$planId')!))
-              : {},
-          studyHours: prefs.getString('${userId}_studyHours_$planId') ?? '0',
-          weeklyQuestionsGoal: prefs.getString('${userId}_weeklyQuestionsGoal_$planId') ?? '0',
-          subjectSettings: prefs.getString('${userId}_subjectSettings_$planId') != null
-              ? Map<String, Map<String, double>>.from(
-                  jsonDecode(prefs.getString('${userId}_subjectSettings_$planId')!).map((key, value) => MapEntry(key, Map<String, double>.from(value))))
-              : {},
-          studyDays: prefs.getStringList('${userId}_studyDays_$planId') ?? [],
-          cycleGenerationTimestamp: prefs.getString('${userId}_cycleGenerationTimestamp_$planId'),
-        );
-        planningDataPerPlan[planId] = planningData;
-      }
-
-      // 3. Montar o objeto de backup
-      final backupData = BackupData(
-        plans: plans,
-        subjects: subjects,
-        studyRecords: studyRecords,
-        reviewRecords: reviewRecords,
-        simuladoRecords: simuladoRecords,
-        planningDataPerPlan: planningDataPerPlan,
-      );
+      final backupData = await DatabaseService.instance.exportBackupData(userId);
 
       // 4. Converter para JSON e salvar
       final jsonString = jsonEncode(backupData.toMap());
@@ -184,6 +142,20 @@ class _BackupScreenState extends State<BackupScreen> {
               await db.deleteAllDataForUser(userId);
               await db.importBackupData(backupData, userId);
 
+              // 1. Definir o plano ativo com base nos dados importados
+              final activePlanProvider = Provider.of<ActivePlanProvider>(backupScreenContext, listen: false);
+              if (backupData.plans.isNotEmpty) {
+                  final oldActivePlanId = prefs.getString('active_plan_id_${userId}');
+                  String newActivePlanIdToSet = backupData.plans.first.id; // Padrão para o primeiro plano
+
+                  if (oldActivePlanId != null && backupData.plans.any((p) => p.id == oldActivePlanId)) {
+                      newActivePlanIdToSet = oldActivePlanId; // Preservar o plano ativo antigo se ele estiver no backup
+                  }
+                  await prefs.setString('active_plan_id_${userId}', newActivePlanIdToSet);
+              } else {
+                  await prefs.remove('active_plan_id_${userId}'); // Nenhum plano, limpar ativo
+              }
+
               for (var entry in backupData.planningDataPerPlan.entries) {
                 final planId = entry.key;
                 final planningData = entry.value;
@@ -206,6 +178,10 @@ class _BackupScreenState extends State<BackupScreen> {
               await Provider.of<AllSubjectsProvider>(backupScreenContext, listen: false).fetchData();
               await Provider.of<HistoryProvider>(backupScreenContext, listen: false).fetchHistory();
               await Provider.of<ReviewProvider>(backupScreenContext, listen: false).fetchReviews();
+              
+              // NEW: Refresh ActivePlanProvider state
+              await Provider.of<ActivePlanProvider>(backupScreenContext, listen: false).refreshActivePlan();
+              
               await Provider.of<PlanningProvider>(backupScreenContext, listen: false).loadData();
 
               if (backupScreenContext.mounted) {
@@ -234,6 +210,44 @@ class _BackupScreenState extends State<BackupScreen> {
         );
       },
     );
+  }
+
+  Future<void> _handleSyncSubjects() async {
+    // Não precisa mais do _isLoading aqui, pois a navegação cuidará do feedback.
+    
+    // Mostra a tela de carregamento.
+    // Usar `push` com uma rota transparente para dar o efeito de "sobreposição".
+    Navigator.of(context).push(
+      PageRouteBuilder(
+        opaque: false,
+        pageBuilder: (context, _, __) => const CatalogImportLoadingScreen(),
+      ),
+    );
+
+    try {
+      await DatabaseService.instance.importSubjectsAndTopicsFromJson();
+      
+      if (mounted) {
+        Navigator.of(context).pop(); // Fecha a tela de carregamento
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Catálogo de matérias sincronizado com sucesso!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.of(context).pop(); // Fecha a tela de carregamento
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao sincronizar catálogo: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+    // O estado _isLoading não é mais necessário para este botão específico.
   }
 
   void _handleDeleteAll() {
@@ -311,7 +325,46 @@ class _BackupScreenState extends State<BackupScreen> {
             const SizedBox(height: 16),
             _buildImportCard(context),
             const SizedBox(height: 16),
+            _buildSyncCard(context),
+            const SizedBox(height: 16),
+            _buildLocalSyncCard(context),
+            const SizedBox(height: 16),
             _buildDeleteCard(context),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSyncCard(BuildContext context) {
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12.0),
+        side: const BorderSide(color: Colors.blueAccent, width: 2),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildCardTitle(context, Icons.sync, 'Sincronizar Catálogo', Colors.blueAccent),
+            const SizedBox(height: 8),
+            Text(
+              'Carrega e atualiza o catálogo de matérias e assuntos disponíveis no aplicativo. Execute esta ação se as matérias não estiverem aparecendo.',
+              style: TextStyle(color: Colors.grey[600]),
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton.icon(
+              onPressed: _isLoading ? null : _handleSyncSubjects,
+              icon: _isLoading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.blueAccent)) : const Icon(Icons.sync),
+              label: Text(_isLoading ? 'Sincronizando...' : 'Sincronizar Catálogo Agora'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blueAccent,
+                foregroundColor: Colors.white,
+                minimumSize: const Size(double.infinity, 40),
+              ),
+            ),
           ],
         ),
       ),
@@ -415,6 +468,45 @@ class _BackupScreenState extends State<BackupScreen> {
               label: Text(_isLoading ? 'Apagando Dados...' : 'Começar do Zero'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+                minimumSize: const Size(double.infinity, 40),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLocalSyncCard(BuildContext context) {
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12.0),
+        side: const BorderSide(color: Colors.blueGrey, width: 2),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildCardTitle(context, Icons.sync_alt, 'Sincronização Local', Colors.blueGrey),
+            const SizedBox(height: 8),
+            Text(
+              'Sincronize seus dados entre dispositivos na mesma rede Wi-Fi.',
+              style: TextStyle(color: Colors.grey[600]),
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton.icon(
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (context) => SyncScreen()),
+                );
+              },
+              icon: const Icon(Icons.sync_alt),
+              label: const Text('Acessar Sincronização Local'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blueGrey,
                 foregroundColor: Colors.white,
                 minimumSize: const Size(double.infinity, 40),
               ),

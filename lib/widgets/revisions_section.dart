@@ -118,7 +118,7 @@ class RevisionCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final reviewProvider = Provider.of<ReviewProvider>(context, listen: false);
     final allSubjectsProvider = Provider.of<AllSubjectsProvider>(context, listen: false);
-    final subject = allSubjectsProvider.subjects.firstWhere((s) => s.id == record.subject_id, orElse: () => Subject(id: '', plan_id: '', subject: 'Desconhecido', color: '#808080', topics: []));
+    final subject = allSubjectsProvider.subjects.firstWhere((s) => s.id == record.subject_id, orElse: () => Subject(id: '', plan_id: '', subject: 'Desconhecido', color: '#808080', topics: [], lastModified: DateTime.now().millisecondsSinceEpoch));
     final subjectColor = Color(int.parse(subject.color.replaceFirst('#', '0xFF')));
 
     final dayDifference = getDaysOverdue(record.scheduled_date);
@@ -170,7 +170,7 @@ class RevisionCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      record.topic,
+                      record.topics.join(', '),
                       style: TextStyle(color: Colors.grey.shade700, fontSize: 14),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -233,7 +233,8 @@ class RevisionCard extends StatelessWidget {
                       plan_id: planId,
                       date: DateTime.now().toIso8601String().split('T')[0],
                       subject_id: record.subject_id!, // Agora seguro por causa da verificação acima
-                      topic: record.topic,
+                      topic_texts: record.topics, // Já é uma lista de Strings
+                      topic_ids: [], // Adicionado (não há ID disponível no ReviewRecord para aqui)
                       study_time: 0, // Inicia zerado para o usuário preencher
                       category: 'revisao',
                       questions: {},
@@ -242,6 +243,7 @@ class RevisionCard extends StatelessWidget {
                       count_in_planning: true,
                       pages: [],
                       videos: [],
+                      lastModified: DateTime.now().millisecondsSinceEpoch,
                     );
 
                     showModalBottomSheet(

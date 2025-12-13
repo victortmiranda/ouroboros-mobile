@@ -119,7 +119,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
       final studiedTopics = <String>{};
       for (var record in allRecords.where((r) => r.plan_id == activePlanId)) {
-        studiedTopics.add(record.topic);
+        // Adiciona todos os topic_texts do registro à lista de tópicos estudados
+        studiedTopics.addAll(record.topic_texts);
       }
 
       progress =
@@ -231,7 +232,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
               subject: 'Desconhecido',
               color: '#808080',
               topics: [],
-              total_topics_count: 0));
+              total_topics_count: 0,
+              lastModified: DateTime.now().millisecondsSinceEpoch));
       final total = entry.value['total'] ?? 0;
       final correct = entry.value['correct'] ?? 0;
       final perf = total > 0 ? (correct / total) * 100 : 0.0;
@@ -285,7 +287,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     plan_id: '',
                     subject: 'Desconhecido',
                     color: '#808080',
-                    topics: []))
+                    topics: [],
+                    lastModified: DateTime.now().millisecondsSinceEpoch))
             .subject;
         dailySubjectStudyTime.putIfAbsent(dateKey, () => {});
         dailySubjectStudyTime[dateKey]!.update(

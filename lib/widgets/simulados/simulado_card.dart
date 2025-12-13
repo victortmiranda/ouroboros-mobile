@@ -1,26 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:ouroboros_mobile/models/simulado_record.dart';
+import 'package:ouroboros_mobile/models/data_models.dart';
 
 import 'package:provider/provider.dart';
 import 'package:ouroboros_mobile/providers/simulados_provider.dart';
 
 import 'package:ouroboros_mobile/screens/simulados/add_edit_simulado_screen.dart';
-
-class ListenableBuilder extends AnimatedWidget {
-  final Listenable listenable;
-  final Widget Function(BuildContext) builder;
-
-  const ListenableBuilder({
-    Key? key,
-    required this.listenable,
-    required this.builder,
-  }) : super(key: key, listenable: listenable);
-
-  @override
-  Widget build(BuildContext context) {
-    return builder(context);
-  }
-}
 
 class SimuladoCard extends StatefulWidget {
   final SimuladoRecord simulado;
@@ -33,6 +17,41 @@ class SimuladoCard extends StatefulWidget {
 
 class _SimuladoCardState extends State<SimuladoCard> {
   bool _isExpanded = false;
+
+  int _getTotalCorrect(SimuladoRecord simulado) {
+    return simulado.subjects.fold(0, (sum, s) => sum + s.correct);
+  }
+
+  int _getTotalIncorrect(SimuladoRecord simulado) {
+    return simulado.subjects.fold(0, (sum, s) => sum + s.incorrect);
+  }
+
+  int _getTotalQuestions(SimuladoRecord simulado) {
+    return simulado.subjects.fold(0, (sum, s) => sum + s.total_questions);
+  }
+
+  int _getTotalBlank(SimuladoRecord simulado) {
+    final total = _getTotalQuestions(simulado);
+    final correct = _getTotalCorrect(simulado);
+    final incorrect = _getTotalIncorrect(simulado);
+    return total - correct - incorrect;
+  }
+
+  double _getPerformance(SimuladoRecord simulado) {
+    final total = _getTotalQuestions(simulado);
+    final correct = _getTotalCorrect(simulado);
+    return total > 0 ? (correct / total) * 100 : 0.0;
+  }
+
+  double _getTotalScore(SimuladoRecord simulado) {
+    return simulado.subjects.fold(0.0, (sum, sub) {
+      if (simulado.style == 'certo_errado') {
+        return sum + (sub.correct - sub.incorrect);
+      } else {
+        return sum + (sub.correct * sub.weight);
+      }
+    });
+  }
 
   Color _getPerformanceColor(double percentage) {
     if (percentage >= 80) return Colors.green;
@@ -71,7 +90,7 @@ class _SimuladoCardState extends State<SimuladoCard> {
                 children: [
                   Text(widget.simulado.name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                   Text(
-                    '${widget.simulado.date.day}/${widget.simulado.date.month}/${widget.simulado.date.year}',
+                    '${DateTime.parse(widget.simulado.date).day}/${DateTime.parse(widget.simulado.date).month}/${DateTime.parse(widget.simulado.date).year}',
                     style: TextStyle(color: Colors.grey[600]),
                   ),
                 ],
@@ -86,7 +105,7 @@ class _SimuladoCardState extends State<SimuladoCard> {
               ),
               child: Center(
                 child: Text(
-                  '${widget.simulado.performance.toStringAsFixed(0)}%',
+                  '${_getPerformance(widget.simulado).toStringAsFixed(0)}%',
                   style: const TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
@@ -99,15 +118,15 @@ class _SimuladoCardState extends State<SimuladoCard> {
         ),
         const SizedBox(height: 10),
         Text('Tipo: ${widget.simulado.style}', style: TextStyle(color: Colors.grey[600])),
-        Text('Tempo Gasto: ${widget.simulado.timeSpent}', style: TextStyle(color: Colors.grey[600])),
+        Text('Tempo Gasto: ${widget.simulado.time_spent}', style: TextStyle(color: Colors.grey[600])),
         const SizedBox(height: 10),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
-            _buildResultItem(Icons.check_circle, widget.simulado.totalCorrect.toString(), Colors.green, 'Acertos'),
-            _buildResultItem(Icons.cancel, widget.simulado.totalIncorrect.toString(), Colors.red, 'Erros'),
-            _buildResultItem(Icons.remove_circle, widget.simulado.totalBlank.toString(), Colors.grey, 'Brancos'),
-            _buildResultItem(Icons.star, widget.simulado.totalScore.toStringAsFixed(0), Colors.amber, 'Pontos'),
+            _buildResultItem(Icons.check_circle, _getTotalCorrect(widget.simulado).toString(), Colors.green, 'Acertos'),
+            _buildResultItem(Icons.cancel, _getTotalIncorrect(widget.simulado).toString(), Colors.red, 'Erros'),
+            _buildResultItem(Icons.remove_circle, _getTotalBlank(widget.simulado).toString(), Colors.grey, 'Brancos'),
+            _buildResultItem(Icons.star, _getTotalScore(widget.simulado).toStringAsFixed(0), Colors.amber, 'Pontos'),
           ],
         ),
       ],
@@ -174,35 +193,29 @@ class _SimuladoCardState extends State<SimuladoCard> {
 
   Widget _buildDetails() {
     final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
-    final listenable = Listenable.merge(
-      widget.simulado.subjects.expand((s) => [s.weight, s.totalQuestions, s.correct, s.incorrect]).toList(),
-    );
 
-    return ListenableBuilder(
-      listenable: listenable,
-      builder: (context) {
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Detalhes por Disciplina', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 10),
-              DataTable(
-                columnSpacing: 12.0,
-                dataRowHeight: 60.0,
-                columns: const [
-                  DataColumn(label: Text('Disciplina', style: TextStyle(fontWeight: FontWeight.bold))),
-                  DataColumn(label: Text('Peso', style: TextStyle(fontWeight: FontWeight.bold))),
-                  DataColumn(label: Text('✓', style: TextStyle(fontWeight: FontWeight.bold))),
-                  DataColumn(label: Text('X', style: TextStyle(fontWeight: FontWeight.bold))),
-                  DataColumn(label: Text('B', style: TextStyle(fontWeight: FontWeight.bold))),
-                  DataColumn(label: Text('∑', style: TextStyle(fontWeight: FontWeight.bold))),
-                  DataColumn(label: Text('%', style: TextStyle(fontWeight: FontWeight.bold))),
-                ],
-                rows: [
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Detalhes por Disciplina', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 10),
+          DataTable(
+            columnSpacing: 12.0,
+            dataRowHeight: 60.0,
+            columns: const [
+              DataColumn(label: Text('Disciplina', style: TextStyle(fontWeight: FontWeight.bold))),
+              DataColumn(label: Text('Peso', style: TextStyle(fontWeight: FontWeight.bold))),
+              DataColumn(label: Text('✓', style: TextStyle(fontWeight: FontWeight.bold))),
+              DataColumn(label: Text('X', style: TextStyle(fontWeight: FontWeight.bold))),
+              DataColumn(label: Text('B', style: TextStyle(fontWeight: FontWeight.bold))),
+              DataColumn(label: Text('∑', style: TextStyle(fontWeight: FontWeight.bold))),
+              DataColumn(label: Text('%', style: TextStyle(fontWeight: FontWeight.bold))),
+            ],
+            rows: [
                   ...widget.simulado.subjects.map((subject) {
-                    final double subjectPerformance = subject.totalQuestions.value > 0 ? (subject.correct.value / subject.totalQuestions.value) * 100 : 0.0;
+                    final double subjectPerformance = subject.total_questions > 0 ? (subject.correct / subject.total_questions) * 100 : 0.0;
                     return DataRow(
                       cells: [
                         DataCell(
@@ -216,7 +229,7 @@ class _SimuladoCardState extends State<SimuladoCard> {
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Text(
-                                  subject.name,
+                                  subject.subject_name,
                                   softWrap: !isLandscape, // Quebra de linha apenas em portrait
                                   maxLines: !isLandscape ? 2 : 1, // Duas linhas em portrait, 1 em landscape
                                   overflow: TextOverflow.ellipsis,
@@ -226,11 +239,11 @@ class _SimuladoCardState extends State<SimuladoCard> {
                             ],
                           ),
                         ),
-                        DataCell(Text(subject.weight.value.toString())),
-                        DataCell(Text(subject.correct.value.toString(), style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold))),
-                        DataCell(Text(subject.incorrect.value.toString(), style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold))),
-                        DataCell(Text((subject.totalQuestions.value - subject.correct.value - subject.incorrect.value).toString(), style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.bold))),
-                        DataCell(Text(subject.totalQuestions.value.toString())),
+                        DataCell(Text(subject.weight.toString())),
+                        DataCell(Text(subject.correct.toString(), style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold))),
+                        DataCell(Text(subject.incorrect.toString(), style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold))),
+                        DataCell(Text((subject.total_questions - subject.correct - subject.incorrect).toString(), style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.bold))),
+                        DataCell(Text(subject.total_questions.toString())),
                         DataCell(
                           Row(
                             children: [
@@ -255,23 +268,23 @@ class _SimuladoCardState extends State<SimuladoCard> {
                     cells: [
                       const DataCell(Text('Total', style: TextStyle(fontWeight: FontWeight.bold))),
                       const DataCell(Text('-')),
-                      DataCell(Text(widget.simulado.totalCorrect.toString(), style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold))),
-                      DataCell(Text(widget.simulado.totalIncorrect.toString(), style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold))),
-                      DataCell(Text(widget.simulado.totalBlank.toString(), style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.bold))),
-                      DataCell(Text(widget.simulado.totalQuestions.toString(), style: const TextStyle(fontWeight: FontWeight.bold))),
+                      DataCell(Text(_getTotalCorrect(widget.simulado).toString(), style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold))),
+                      DataCell(Text(_getTotalIncorrect(widget.simulado).toString(), style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold))),
+                      DataCell(Text(_getTotalBlank(widget.simulado).toString(), style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.bold))),
+                      DataCell(Text(_getTotalQuestions(widget.simulado).toString(), style: const TextStyle(fontWeight: FontWeight.bold))),
                       DataCell(
                         Row(
                           children: [
                             SizedBox(
                               width: 50,
                               child: LinearProgressIndicator(
-                                value: widget.simulado.performance / 100,
+                                value: _getPerformance(widget.simulado) / 100,
                                 backgroundColor: Colors.grey[300],
-                                color: _getPerformanceColor(widget.simulado.performance),
+                                color: _getPerformanceColor(_getPerformance(widget.simulado)),
                               ),
                             ),
                             const SizedBox(width: 8),
-                            Text('${widget.simulado.performance.toStringAsFixed(0)}%', style: const TextStyle(fontWeight: FontWeight.bold)),
+                            Text('${_getPerformance(widget.simulado).toStringAsFixed(0)}%', style: const TextStyle(fontWeight: FontWeight.bold)),
                           ],
                         ),
                       ),
@@ -282,7 +295,5 @@ class _SimuladoCardState extends State<SimuladoCard> {
             ],
           ),
         );
-      },
-    );
   }
 }

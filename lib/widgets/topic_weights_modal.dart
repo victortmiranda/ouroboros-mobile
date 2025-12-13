@@ -14,12 +14,19 @@ class TopicWeightsModal extends StatefulWidget {
 
 class _TopicWeightsModalState extends State<TopicWeightsModal> {
   late Map<int, int> _topicWeights;
+  final ScrollController _scrollController = ScrollController();
 
   @override
   void initState() {
     super.initState();
     _topicWeights = {};
     _extractWeights(widget.subject.topics);
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
   }
 
   void _extractWeights(List<Topic> topics) {
@@ -49,10 +56,12 @@ class _TopicWeightsModalState extends State<TopicWeightsModal> {
         child: widget.subject.topics.isEmpty
             ? const Center(child: Text('Nenhum tópico encontrado para esta matéria.'))
             : Scrollbar( // Adicionado Scrollbar
+                controller: _scrollController,
                 thumbVisibility: true,
 
 
                 child: ListView(
+                  controller: _scrollController,
                   children: widget.subject.topics.map((topic) {
                     return _buildTopicRow(topic, 0);
                   }).toList(),

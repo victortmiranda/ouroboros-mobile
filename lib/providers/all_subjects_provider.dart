@@ -7,8 +7,8 @@ import 'package:ouroboros_mobile/providers/plans_provider.dart';
 
 class AllSubjectsProvider with ChangeNotifier {
   final DatabaseService _dbService = DatabaseService.instance;
-  final AuthProvider? _authProvider;
-  final PlansProvider? _plansProvider;
+  AuthProvider? authProvider;
+  PlansProvider? plansProvider;
 
   List<Subject> _subjects = [];
   Map<String, Plan> _plansMap = {};
@@ -40,22 +40,10 @@ class AllSubjectsProvider with ChangeNotifier {
   Map<String, Plan> get plansMap => _plansMap;
   bool get isLoading => _isLoading;
 
-  AllSubjectsProvider({AuthProvider? authProvider, PlansProvider? plansProvider})
-      : _authProvider = authProvider,
-        _plansProvider = plansProvider {
-    fetchData();
-    _plansProvider?.addListener(_onPlansProviderChanged);
-  }
-
-  void _onPlansProviderChanged() {
-    print('AllSubjectsProvider: PlansProvider mudou, recarregando dados internos.');
-    _internalRefreshData();
-    notifyListeners();
-  }
+  AllSubjectsProvider({this.authProvider, this.plansProvider});
 
   @override
   void dispose() {
-    _plansProvider?.removeListener(_onPlansProviderChanged);
     _isDisposed = true;
     super.dispose();
   }
@@ -69,24 +57,24 @@ class AllSubjectsProvider with ChangeNotifier {
 
   // New private method to refresh data without notifying about loading state
   Future<void> _internalRefreshData() async {
-    if (_authProvider?.currentUser == null) return;
+    if (authProvider?.currentUser == null) return;
     print('AllSubjectsProvider: Iniciando _internalRefreshData...');
-    _subjects = await _dbService.readAllSubjects(_authProvider!.currentUser!.name);
-    final allPlans = await _dbService.readAllPlans(_authProvider!.currentUser!.name);
+    _subjects = await _dbService.readAllSubjects(authProvider!.currentUser!.name);
+    final allPlans = await _dbService.readAllPlans(authProvider!.currentUser!.name);
     _plansMap = { for (var plan in allPlans) plan.id: plan };
 
     // Filtrar matérias para incluir apenas aquelas com planos existentes
     _subjects = _subjects.where((subject) => _plansMap.containsKey(subject.plan_id)).toList();
-    _studyRecords = await _dbService.readStudyRecordsForUser(_authProvider!.currentUser!.name);
+    _studyRecords = await _dbService.readStudyRecordsForUser(authProvider!.currentUser!.name);
     _simuladoRecords = [];
     for (final plan in allPlans) {
-      _simuladoRecords.addAll(await _dbService.readSimuladoRecordsForPlan(plan.id, _authProvider!.currentUser!.name));
+      _simuladoRecords.addAll(await _dbService.readSimuladoRecordsForPlan(plan.id, authProvider!.currentUser!.name));
     }
     print('AllSubjectsProvider: _internalRefreshData concluído.');
   }
 
   Future<void> fetchData() async {
-    if (_authProvider?.currentUser == null) return;
+    if (authProvider?.currentUser == null) return;
     print('AllSubjectsProvider: Iniciando fetchData...');
     _setLoading(true);
     await _internalRefreshData();
@@ -183,14 +171,16 @@ class AllSubjectsProvider with ChangeNotifier {
   }
 
   Future<void> addSubject(Subject subject) async {
-    if (_authProvider?.currentUser == null) return;
-    await _dbService.createSubject(subject, _authProvider!.currentUser!.name);
+    if (authProvider?.currentUser == null) return;
+    final newSubject = subject.copyWith(lastModified: DateTime.now().millisecondsSinceEpoch);
+    await _dbService.createSubject(newSubject, authProvider!.currentUser!.name);
     await fetchData(); // Keep full fetch here to update UI correctly
   }
 
   Future<void> updateSubject(Subject subject) async {
-    if (_authProvider?.currentUser == null) return;
-    await _dbService.updateSubject(subject, _authProvider!.currentUser!.name);
+    if (authProvider?.currentUser == null) return;
+    final updatedSubject = subject.copyWith(lastModified: DateTime.now().millisecondsSinceEpoch);
+    await _dbService.updateSubject(updatedSubject, authProvider!.currentUser!.name);
     await fetchData();
   }
 

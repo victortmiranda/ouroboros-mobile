@@ -6,11 +6,14 @@ import 'package:collection/collection.dart';
 import 'package:ouroboros_mobile/screens/mentoria_screen.dart';
 
 import 'package:ouroboros_mobile/providers/auth_provider.dart';
+import 'package:ouroboros_mobile/providers/history_provider.dart'; // Import adicionado
+
 
 class PlanningProvider with ChangeNotifier {
   String? _planId;
   final AuthProvider? _authProvider;
   final MentoriaProvider? mentoriaProvider;
+  final HistoryProvider? _historyProvider; // NOVO CAMPO
 
   List<Subject> _subjects = [];
   List<StudySession>? _studyCycle;
@@ -24,7 +27,9 @@ class PlanningProvider with ChangeNotifier {
   List<String> _studyDays = [];
   String? _cycleGenerationTimestamp;
 
-  PlanningProvider({this.mentoriaProvider, AuthProvider? authProvider}) : _authProvider = authProvider;
+  PlanningProvider({this.mentoriaProvider, AuthProvider? authProvider, HistoryProvider? historyProvider})
+      : _authProvider = authProvider,
+        _historyProvider = historyProvider;
 
   // Getters
   List<Subject> get subjects => _subjects;
@@ -181,9 +186,11 @@ class PlanningProvider with ChangeNotifier {
   }
 
   void recalculateProgress(List<StudyRecord> allRecords) {
-    if (studyCycle == null) return;
+    print('PlanningProvider: recalculateProgress - _planId: $_planId');
+    print('PlanningProvider: recalculateProgress - studyCycle is null: ${studyCycle == null}');
+    if (studyCycle == null) return; // Se não há ciclo de estudo, não há nada para recalcular o progresso.
 
-    // 1. Reset progress
+    // 1. Resetar progresso
     _currentProgressMinutes = 0;
     _completedCycles = 0;
     _sessionProgressMap = {};
@@ -252,7 +259,15 @@ class PlanningProvider with ChangeNotifier {
     _studyDays = prefs.getStringList(_key('studyDays')) ?? [];
     _cycleGenerationTimestamp = prefs.getString(_key('cycleGenerationTimestamp'));
 
-    notifyListeners();
+    // Após carregar os dados salvos, recalcular o progresso a partir do histórico
+    if (_historyProvider != null) {
+        // Assegurar que _historyProvider carregou seus dados primeiro
+        await _historyProvider!.fetchHistory(); // Garantir que o histórico esteja atualizado
+        recalculateProgress(_historyProvider!.allStudyRecords);
+    } else {
+        // Fallback: se historyProvider for nulo, ainda notificar os listeners
+        notifyListeners();
+    }
   }
 
   Future<void> saveData() async {
@@ -440,25 +455,26 @@ class PlanningProvider with ChangeNotifier {
     }
 
     if (mentoriaProvider?.sequentialTopics == true) {
-      final firstUnstudiedTopic = allTopics.firstWhereOrNull((topic) {
-        final topicRecords = studyRecords.where((r) => r.topic == topic.topic_text && r.subject_id == subject.id).toList();
-        return topicRecords.every((r) => !r.teoria_finalizada);
-      });
-
-      return {
-        'recommendedTopic': firstUnstudiedTopic ?? allTopics.first,
-        'justification': 'Recomendação sequencial ativada.',
-        'nextSession': nextSession,
-      };
-    }
-
-    Topic? bestTopic;
-    double maxScore = -1.0;
-    final now = DateTime.now();
-
-    for (var topic in allTopics) {
-      final topicRecords = studyRecords.where((r) => r.topic == topic.topic_text && r.subject_id == subject.id).toList();
-
+            final firstUnstudiedTopic = allTopics.firstWhereOrNull((topic) {
+              // Verifica se a lista topic_texts do record contém o topic.topic_text
+              final topicRecords = studyRecords.where((r) => r.topic_texts.contains(topic.topic_text) && r.subject_id == subject.id).toList();
+              return topicRecords.every((r) => !r.teoria_finalizada);
+            });
+          
+            return {
+              'recommendedTopic': firstUnstudiedTopic ?? allTopics.first,
+              'justification': 'Recomendação sequencial ativada.',
+              'nextSession': nextSession,
+            };
+          }
+          
+          Topic? bestTopic;
+          double maxScore = -1.0;
+          final now = DateTime.now();
+          
+          for (var topic in allTopics) {
+            // Verifica se a lista topic_texts do record contém o topic.topic_text
+            final topicRecords = studyRecords.where((r) => r.topic_texts.contains(topic.topic_text) && r.subject_id == subject.id).toList();
       double totalScore = 0;
       int criteriaCount = 0;
 
@@ -510,7 +526,7 @@ class PlanningProvider with ChangeNotifier {
       }
 
       if (mentoriaProvider?.prioritizePendingReviews == true) {
-        final pendingReviews = reviewRecords.where((r) => r.topic == topic.topic_text && r.subject_id == subject.id && r.status == 'pending').toList();
+        final pendingReviews = reviewRecords.where((r) => r.topics.contains(topic.topic_text) && r.subject_id == subject.id && r.status == 'pending').toList();
         if (pendingReviews.isNotEmpty) {
           totalScore += 1.0;
         }
@@ -518,7 +534,7 @@ class PlanningProvider with ChangeNotifier {
       }
 
       if (mentoriaProvider?.prioritizeMostReviewed == true) {
-        final reviewedCount = reviewRecords.where((r) => r.topic == topic.topic_text && r.subject_id == subject.id).length;
+        final reviewedCount = reviewRecords.where((r) => r.topics.contains(topic.topic_text) && r.subject_id == subject.id).length;
         // Normalize, assuming max reviews is 10
         double score = (reviewedCount / 10.0).clamp(0.0, 1.0);
         totalScore += score;

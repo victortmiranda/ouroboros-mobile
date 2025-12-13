@@ -2,7 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:ouroboros_mobile/providers/active_plan_provider.dart';
 import 'package:provider/provider.dart';
 import 'dart:io';
+import 'dart:convert'; // NEW IMPORT for json.encode, json.decode, utf8.decode
+import 'dart:async'; // NEW IMPORT for TimeoutException
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:http/http.dart' as http; // NEW IMPORT
+import 'package:ouroboros_mobile/services/mdns_advertiser.dart'; // NEW IMPORT
+import 'package:ouroboros_mobile/services/mdns_discovery_service.dart'; // NEW IMPORT
+import 'package:ouroboros_mobile/services/sync_service.dart'; // NEW IMPORT
+import 'package:ouroboros_mobile/models/backup_model.dart'; // NEW IMPORT
+
 
 import 'package:ouroboros_mobile/widgets/create_plan_modal.dart';
 import 'package:ouroboros_mobile/providers/subject_provider.dart';
@@ -47,6 +55,10 @@ import 'package:ouroboros_mobile/providers/stopwatch_provider.dart';
 import 'package:ouroboros_mobile/screens/login_screen.dart';
 import 'package:ouroboros_mobile/providers/auth_provider.dart';
 import 'package:ouroboros_mobile/screens/splash_screen.dart'; // Import the new splash screen
+import 'package:ouroboros_mobile/services/database_service.dart'; // NEW IMPORT
+
+final restartNotifier = ValueNotifier<int>(0);
+final GlobalKey<ScaffoldMessengerState> snackbarKey = GlobalKey<ScaffoldMessengerState>(); // NEW
 
 void main() async { // Make main async
   WidgetsFlutterBinding.ensureInitialized(); // Ensure bindings are initialized
@@ -62,65 +74,98 @@ void main() async { // Make main async
     databaseFactory = databaseFactoryFfi;
   }
 
-  runApp(
-    MultiProvider(
-      providers: [
-        ChangeNotifierProvider(create: (context) => AuthProvider()),
-        ChangeNotifierProvider(create: (context) => NavigationProvider()),
-        ChangeNotifierProvider(create: (context) => StopwatchProvider()),
-        ChangeNotifierProxyProvider<AuthProvider, PlansProvider>(
-          create: (context) => PlansProvider(authProvider: Provider.of<AuthProvider>(context, listen: false)),
-          update: (context, auth, previous) => PlansProvider(authProvider: auth),
-        ),
-        ChangeNotifierProxyProvider2<AuthProvider, PlansProvider, AllSubjectsProvider>(
-          create: (context) => AllSubjectsProvider(
-            authProvider: Provider.of<AuthProvider>(context, listen: false),
-            plansProvider: Provider.of<PlansProvider>(context, listen: false),
-          ),
-          update: (context, auth, plans, previous) => AllSubjectsProvider(
-            authProvider: auth,
-            plansProvider: plans,
-          ),
-        ),
-        ChangeNotifierProxyProvider<AuthProvider, ActivePlanProvider>(
-          create: (context) => ActivePlanProvider(authProvider: Provider.of<AuthProvider>(context, listen: false)),
-          update: (context, auth, previous) => ActivePlanProvider(authProvider: auth),
-        ),
-        ChangeNotifierProxyProvider<AuthProvider, ReviewProvider>(
-          create: (context) => ReviewProvider(authProvider: Provider.of<AuthProvider>(context, listen: false)),
-          update: (context, auth, previous) => ReviewProvider(authProvider: auth),
-        ),
-        ChangeNotifierProvider(create: (context) => FilterProvider()),
-        ChangeNotifierProxyProvider3<AuthProvider, ReviewProvider, FilterProvider, HistoryProvider>(
-          create: (context) => HistoryProvider(
-            Provider.of<ReviewProvider>(context, listen: false),
-            Provider.of<FilterProvider>(context, listen: false),
-            Provider.of<AuthProvider>(context, listen: false),
-          ),
-          update: (context, auth, reviewProvider, filterProvider, previousHistory) {
-            // Sempre retorna uma nova instância ou atualiza a existente com as novas dependências
-            return HistoryProvider(reviewProvider, filterProvider, auth);
-          },
-        ),
-        ChangeNotifierProxyProvider<AuthProvider, SubjectProvider>(
-          create: (context) => SubjectProvider(authProvider: Provider.of<AuthProvider>(context, listen: false)),
-          update: (context, auth, previous) => SubjectProvider(authProvider: auth),
-        ),
-        ChangeNotifierProvider(create: (_) => MentoriaProvider()),
-        ChangeNotifierProvider(create: (_) => RemindersProvider()),
-        ChangeNotifierProvider(create: (_) => SimuladosProvider()), // Adicionado SimuladosProvider aqui
-        ChangeNotifierProxyProvider2<AuthProvider, ActivePlanProvider, PlanningProvider>(
-          create: (context) => PlanningProvider(
-            mentoriaProvider: Provider.of<MentoriaProvider>(context, listen: false),
-            authProvider: Provider.of<AuthProvider>(context, listen: false),
-          ),
-          update: (_, auth, activePlan, previous) => previous!..updateForPlan(activePlan.activePlanId),
-        ),
-      ],
-      child: const MyApp(),
-    ),
-  );
+  runApp(const RootWidget());
 }
+
+class RootWidget extends StatelessWidget {
+  const RootWidget({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<int>(
+      valueListenable: restartNotifier,
+      builder: (context, value, child) {
+        return MultiProvider(
+          providers: [
+            ChangeNotifierProvider(create: (context) => AuthProvider()),
+            ChangeNotifierProvider(create: (context) => NavigationProvider()),
+            ChangeNotifierProvider(create: (context) => StopwatchProvider()),
+            ChangeNotifierProxyProvider<AuthProvider, PlansProvider>(
+              create: (context) => PlansProvider(authProvider: Provider.of<AuthProvider>(context, listen: false)),
+              update: (context, auth, previous) => PlansProvider(authProvider: auth),
+            ),
+            ChangeNotifierProxyProvider2<AuthProvider, PlansProvider, AllSubjectsProvider>(
+              create: (context) {
+                final auth = Provider.of<AuthProvider>(context, listen: false);
+                final plans = Provider.of<PlansProvider>(context, listen: false);
+                return AllSubjectsProvider(authProvider: auth, plansProvider: plans)..fetchData();
+              },
+              update: (context, auth, plans, previous) {
+                if (previous == null) {
+                  final newProvider = AllSubjectsProvider(authProvider: auth, plansProvider: plans);
+                  newProvider.fetchData();
+                  return newProvider;
+                }
+                
+                if (plans.isLoading) {
+                  return previous;
+                }
+                
+                final hasAuthProviderChanged = previous.authProvider != auth;
+                final hasPlansProviderChanged = previous.plansProvider != plans;
+                
+                if (hasAuthProviderChanged || hasPlansProviderChanged) {
+                  previous.authProvider = auth;
+                  previous.plansProvider = plans;
+                  previous.fetchData();
+                }
+                
+                return previous;
+              },
+            ),
+            ChangeNotifierProxyProvider<AuthProvider, ActivePlanProvider>(
+              create: (context) => ActivePlanProvider(authProvider: Provider.of<AuthProvider>(context, listen: false)),
+              update: (context, auth, previous) => ActivePlanProvider(authProvider: auth),
+            ),
+            ChangeNotifierProxyProvider<AuthProvider, ReviewProvider>(
+              create: (context) => ReviewProvider(authProvider: Provider.of<AuthProvider>(context, listen: false)),
+              update: (context, auth, previous) => ReviewProvider(authProvider: auth),
+            ),
+            ChangeNotifierProvider(create: (context) => FilterProvider()),
+            ChangeNotifierProxyProvider3<AuthProvider, ReviewProvider, FilterProvider, HistoryProvider>(
+              create: (context) => HistoryProvider(
+                Provider.of<ReviewProvider>(context, listen: false),
+                Provider.of<FilterProvider>(context, listen: false),
+                Provider.of<AuthProvider>(context, listen: false),
+              ),
+              update: (context, auth, reviewProvider, filterProvider, previousHistory) {
+                // Sempre retorna uma nova instância ou atualiza a existente com as novas dependências
+                return HistoryProvider(reviewProvider, filterProvider, auth);
+              },
+            ),
+            ChangeNotifierProxyProvider<AuthProvider, SubjectProvider>(
+              create: (context) => SubjectProvider(authProvider: Provider.of<AuthProvider>(context, listen: false)),
+              update: (context, auth, previous) => SubjectProvider(authProvider: auth),
+            ),
+            ChangeNotifierProvider(create: (_) => MentoriaProvider()),
+            ChangeNotifierProvider(create: (_) => RemindersProvider()),
+            ChangeNotifierProvider(create: (_) => SimuladosProvider()), // Adicionado SimuladosProvider aqui
+            ChangeNotifierProxyProvider3<AuthProvider, ActivePlanProvider, HistoryProvider, PlanningProvider>(
+              create: (context) => PlanningProvider(
+                mentoriaProvider: Provider.of<MentoriaProvider>(context, listen: false),
+                authProvider: Provider.of<AuthProvider>(context, listen: false),
+                historyProvider: Provider.of<HistoryProvider>(context, listen: false), // NEW
+              ),
+              update: (_, auth, activePlan, history, previous) => previous!..updateForPlan(activePlan.activePlanId), // Modified update signature
+            ),
+          ],
+          child: const MyApp(),
+        );
+      },
+    );
+  }
+}
+
 
 class MyApp extends StatefulWidget {
   const MyApp({super.key});
@@ -131,11 +176,176 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   late Future<void> _tryAutoLoginFuture;
+  // Removed: late StreamSubscription _authSubscription; // NEW
+
+  // NEW: Sync Service instances
+  static const int _syncPort = 5000;
+  late MdnsAdvertiser _advertiser; // Changed to late and not final for initialization in initState
+  // MDNSDiscoveryService _discover is not global, only used by SyncScreen
+  final SyncService _sync = SyncService();
+  final Uuid _uuid = Uuid();
+  String _myDeviceId = ''; // To store device ID for sync
+
 
   @override
   void initState() {
     super.initState();
+    _myDeviceId = _uuid.v4(); // Generate device ID on init before advertiser is created
+
+    // Initialize _advertiser here after _myDeviceId is generated
+    _advertiser = MdnsAdvertiser(
+      instanceName: 'Ouroboros-${_myDeviceId.substring(0, 8)}', // Use first 8 chars for brevity
+      serviceType: '_ouro._tcp.local',
+      port: _syncPort,
+    );
+
     _tryAutoLoginFuture = Provider.of<AuthProvider>(context, listen: false).tryAutoLogin();
+
+    // Listen to AuthProvider changes to start/stop sync services
+    Provider.of<AuthProvider>(context, listen: false).addListener(_authListener); // Use the new method
+
+    // Check initial login state
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    if (authProvider.isLoggedIn && authProvider.currentUser?.name != null) {
+      _startSyncServices(authProvider.currentUser!.name!);
+    }
+  }
+
+  @override
+  void dispose() {
+    Provider.of<AuthProvider>(context, listen: false).removeListener(_authListener); // Remove the listener
+    _stopSyncServices(); // Ensure services are stopped on app dispose
+    super.dispose();
+  }
+
+  void _authListener() {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    if (authProvider.isLoggedIn && authProvider.currentUser?.name != null) {
+      _startSyncServices(authProvider.currentUser!.name!);
+    } else {
+      _stopSyncServices();
+    }
+  }
+
+  Future<void> _startSyncServices(String userId) async {
+    print('[Global Sync] Starting sync services for user: $userId');
+    // Check if server is already running to prevent "Port already in use" errors
+    if (_sync.server == null) { // Accessing public getter
+      await _sync.startServer(port: _syncPort, userId: userId);
+    }
+    // Check if advertiser is already running
+    if (_advertiser.socket == null) { // Accessing public getter
+      await _advertiser.start();
+    }
+  }
+
+  Future<void> _stopSyncServices() async {
+    print('[Global Sync] Stopping sync services.');
+    _advertiser.stop(); // Removed await
+    await _sync.stopServer();
+  }
+
+  // NEW: Quick Sync Function
+  Future<void> _quickSync() async {
+    // Show loading indicator
+    snackbarKey.currentState?.showSnackBar(
+      const SnackBar(content: Text('Iniciando sincronização rápida...')),
+    );
+
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final userId = authProvider.currentUser?.name;
+    if (userId == null) {
+      snackbarKey.currentState?.showSnackBar(
+        const SnackBar(content: Text('Erro: Usuário não logado para sincronizar.')),
+      );
+      return;
+    }
+
+    try {
+      // Server is already running globally, no need to start it here.
+
+      // Get paired devices
+      final pairedDevices = await _sync.getPairedDevices();
+      if (pairedDevices.isEmpty) {
+              snackbarKey.currentState?.showSnackBar(
+                const SnackBar(content: Text('Nenhum dispositivo pareado encontrado.')),
+              );
+                // Server is already running globally, no need to stop it here.
+                return;      }
+      
+      // Assume the first paired device is the target
+      final targetDevice = pairedDevices.entries.first.value as Map<String, dynamic>;
+      final targetIp = targetDevice['ip'];
+      final targetPort = targetDevice['port'];
+      final targetToken = targetDevice['token'];
+      final targetName = targetDevice['name'];
+
+      if (targetIp == null || targetPort == null || targetToken == null) {
+              snackbarKey.currentState?.showSnackBar(
+                const SnackBar(content: Text('Dados do dispositivo pareado incompletos.')),
+              );
+                // Server is already running globally, no need to stop it here.
+                return;      }
+
+      snackbarKey.currentState?.showSnackBar(
+        SnackBar(content: Text('Tentando sincronizar com $targetName ($targetIp)...')),
+      );
+
+      // 3. Initiate client-side sync logic (similar to SyncScreen's _syncNow)
+      // This part will attempt to connect to the target device as a client.
+      final uri = Uri.parse('http://$targetIp:$targetPort/sync');
+      
+      // 3.1. Export client's current data
+      final clientBackupData = await DatabaseService.instance.exportBackupData(userId);
+      final clientJsonData = json.encode(clientBackupData.toMap());
+
+      // 3.2. Attempt to POST to target device, with a timeout
+      final response = await http.post(
+        uri,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $targetToken',
+          'X-User-ID': userId,
+        },
+        body: clientJsonData,
+      ).timeout(const Duration(seconds: 30), onTimeout: () {
+        throw TimeoutException('Tempo esgotado ao tentar conectar ao dispositivo pareado.');
+      });
+
+
+
+      switch (response.statusCode) {
+        case 200:
+          final mergedBackupData = BackupData.fromMap(json.decode(utf8.decode(response.bodyBytes)));
+          await DatabaseService.instance.importMergedData(mergedBackupData, userId);
+          snackbarKey.currentState?.showSnackBar(
+            const SnackBar(content: Text('Sincronização rápida concluída com sucesso!')),
+          );
+          // Restart app to reflect changes
+          restartNotifier.value++; 
+          break;
+        case 403:
+          snackbarKey.currentState?.showSnackBar(
+            const SnackBar(content: Text('Falha na sincronização: Token inválido. Recrie o pareamento.')),
+          );
+          break;
+        case 409:
+          snackbarKey.currentState?.showSnackBar(
+            const SnackBar(content: Text('Falha na sincronização: IDs de usuário não correspondem.')),
+          );
+          break;
+        default:
+          snackbarKey.currentState?.showSnackBar(
+            SnackBar(content: Text('Falha na sincronização: ${response.statusCode} - ${response.body}')),
+          );
+      }
+    } catch (e) {
+      snackbarKey.currentState?.showSnackBar(
+        SnackBar(content: Text('Erro durante a sincronização rápida: $e')),
+      );
+    } finally {
+      // Server is already running globally, no need to stop it here.
+    }
   }
 
   @override
@@ -143,6 +353,7 @@ class _MyAppState extends State<MyApp> {
     return Consumer<AuthProvider>(
       builder: (context, authProvider, child) {
         return MaterialApp(
+          scaffoldMessengerKey: snackbarKey, // NEW
           title: 'Ouroboros',
           theme: ThemeData(
             primarySwatch: Colors.teal, // Changed to teal
@@ -210,7 +421,7 @@ class _MyAppState extends State<MyApp> {
           ),
           themeMode: ThemeMode.system, // Pode ser alterado para ThemeMode.light ou ThemeMode.dark
           home: authProvider.isLoggedIn
-              ? const HomePage()
+              ? HomePage(onQuickSync: _quickSync)
               : FutureBuilder(
                   future: _tryAutoLoginFuture,
                   builder: (ctx, authResultSnapshot) =>
@@ -248,15 +459,19 @@ MaterialColor createMaterialColor(Color color) {
 // ... (other imports)
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  final Future<void> Function() onQuickSync; // NEW
+
+  const HomePage({super.key, required this.onQuickSync}); // MODIFIED
 
   @override
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin {
+class _HomePageState extends State<HomePage> with TickerProviderStateMixin { // Changed SingleTickerProviderStateMixin to TickerProviderStateMixin
   late AnimationController _animationController;
   late Animation<double> _scaleAnimation;
+  late AnimationController _syncRotationController; // NEW
+  late Animation<double> _syncRotationAnimation;   // NEW
 
   void _handleGetRecommendation(BuildContext context) async {
     // Show loading indicator immediately
@@ -317,7 +532,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       plan_id: activePlanProvider.activePlan?.id ?? '',
       date: DateTime.now().toIso8601String(),
       subject_id: nextSession.subjectId,
-      topic: recommendedTopic?.topic_text ?? nextSession.subject,
+      topic_texts: [recommendedTopic?.topic_text ?? nextSession.subject], // Usar lista de textos
+      topic_ids: [recommendedTopic?.id?.toString() ?? ''], // Usar lista de IDs, convertendo para String
       study_time: nextSession.duration * 60 * 1000,
       category: 'teoria',
       questions: {},
@@ -326,6 +542,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       count_in_planning: true,
       pages: [],
       videos: [],
+      lastModified: DateTime.now().millisecondsSinceEpoch,
     );
 
         if (context.mounted) {
@@ -361,6 +578,12 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     _scaleAnimation = Tween<double>(begin: 1.0, end: 1.15).animate(
       CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
     );
+
+    _syncRotationController = AnimationController( // NEW
+      vsync: this,
+      duration: const Duration(milliseconds: 500),
+    );
+    _syncRotationAnimation = Tween<double>(begin: 0, end: 1).animate(_syncRotationController); // NEW
 
     _allScreens = <Widget>[
       // BottomNavigationBar items
@@ -400,7 +623,12 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   @override
   void dispose() {
     _animationController.dispose();
+    _syncRotationController.dispose(); // NEW
     super.dispose();
+  }
+
+  void _startSyncAnimation() { // NEW method
+    _syncRotationController.forward(from: 0.0);
   }
 
   void _togglePlanningScreenEditMode() {
@@ -432,7 +660,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       plan_id: planId,
       date: DateTime.now().toIso8601String(),
       subject_id: '', // Will be selected in the modal
-      topic: '', // Will be selected in the modal
+      topic_texts: [], // Vazio, será selecionado no modal
+      topic_ids: [],   // Vazio, será selecionado no modal
       study_time: 0,
       category: 'teoria',
       questions: {},
@@ -441,6 +670,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       count_in_planning: true,
       pages: [],
       videos: [],
+      lastModified: DateTime.now().millisecondsSinceEpoch,
     );
 
     if (context.mounted) {
@@ -505,15 +735,17 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                 title: _isDrawerOpen ? const Text('') : Text(_allAppBarTitles.elementAt(selectedIndex)),
                 actions: <Widget>[
                   if (selectedIndex == 1 && hasActiveCycle)
-                    ElevatedButton.icon(
-                      icon: const Icon(Icons.play_arrow), // Novo ícone para iniciar estudo
-                      label: const Text('Iniciar Estudo Sugerido'),
-                      onPressed: () => _handleGetRecommendation(context),
-                      style: ElevatedButton.styleFrom(
-                        foregroundColor: Colors.white,
-                        backgroundColor: Colors.teal,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(20),
+                    Flexible(
+                      child: ElevatedButton.icon(
+                        icon: const Icon(Icons.play_arrow), // Novo ícone para iniciar estudo
+                        label: const Text('Iniciar Estudo Sugerido'),
+                        onPressed: () => _handleGetRecommendation(context),
+                        style: ElevatedButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          backgroundColor: Colors.teal,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(20),
+                          ),
                         ),
                       ),
                     ),
@@ -546,33 +778,105 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                       tooltip: 'Apagar Ciclo',
                     ),
                   if (selectedIndex == 0) // PlansScreen index
-                    Builder(
-                      builder: (context) => ElevatedButton.icon(
-                        icon: const Icon(Icons.add),
-                        label: const Text('Criar Novo Plano'),
-                        onPressed: () {
-                          showDialog(
-                            context: context,
-                            builder: (BuildContext context) {
-                              return const CreatePlanModal();
-                            },
-                          );
-                        },
-                        style: ElevatedButton.styleFrom(
-                          foregroundColor: Colors.white,
-                          backgroundColor: Colors.teal,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(20),
+                    Flexible(
+                      child: Builder(
+                        builder: (context) => ElevatedButton.icon(
+                          icon: const Icon(Icons.add),
+                          label: const Text('Criar Novo Plano'),
+                          onPressed: () {
+                            showDialog(
+                              context: context,
+                              builder: (BuildContext context) {
+                                return const CreatePlanModal();
+                              },
+                            );
+                          },
+                          style: ElevatedButton.styleFrom(
+                            foregroundColor: Colors.white,
+                            backgroundColor: Colors.teal,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(20),
+                            ),
                           ),
                         ),
                       ),
                     ),
                   if (selectedIndex == 5) // DashboardScreen index
-                    Builder(
-                      builder: (context) => ElevatedButton.icon(
-                        icon: const Icon(Icons.add_circle),
-                        label: const Text('Adicionar Estudo'),
-                        onPressed: () => _showStudyRegisterModal(context),
+                    Flexible(
+                      child: Builder(
+                        builder: (context) => ElevatedButton.icon(
+                          icon: const Icon(Icons.add_circle),
+                          label: const Text('Adicionar Estudo'),
+                          onPressed: () => _showStudyRegisterModal(context),
+                          style: ElevatedButton.styleFrom(
+                            foregroundColor: Colors.white,
+                            backgroundColor: Colors.teal,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (selectedIndex == 4) // HistoryScreen index
+                    Flexible(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.end, // Alinha os botões à direita
+                        children: [
+                          ElevatedButton.icon(
+                            onPressed: () => _showStudyRegisterModal(context),
+                            icon: const Icon(Icons.add_circle),
+                            label: const Text('Adicionar Estudo'),
+                            style: ElevatedButton.styleFrom(
+                              foregroundColor: Colors.white,
+                              backgroundColor: Colors.teal,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          ElevatedButton.icon(
+                            onPressed: () {
+                              showDialog(
+                                context: context,
+                                builder: (context) {
+                                  final historyProvider = Provider.of<HistoryProvider>(context, listen: false);
+                                  final allSubjectsProvider = Provider.of<AllSubjectsProvider>(context, listen: false);
+                                  return FilterModal(
+                                    screen: FilterScreen.history,
+                                    availableCategories: historyProvider.availableCategories,
+                                    availableSubjects: allSubjectsProvider.subjects,
+                                  );
+                                },
+                              );
+                            },
+                            icon: const Icon(Icons.filter_list),
+                            label: const Text('Filtros'),
+                            style: ElevatedButton.styleFrom(
+                              foregroundColor: Colors.white,
+                              backgroundColor: Colors.teal,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8), // Add some spacing
+                        ],
+                      ),
+                    ),
+                  if (selectedIndex == 8) // SimuladosScreen index
+                    Flexible(
+                      child: ElevatedButton.icon(
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (ctx) => const AddEditSimuladoScreen(),
+                            ),
+                          );
+                        },
+                        icon: const Icon(Icons.add),
+                        label: const Text('Novo Simulado'),
                         style: ElevatedButton.styleFrom(
                           foregroundColor: Colors.white,
                           backgroundColor: Colors.teal,
@@ -582,136 +886,80 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                         ),
                       ),
                     ),
-                  if (selectedIndex == 4) // HistoryScreen index
-                    Row(
-                      children: [
-                        ElevatedButton.icon(
-                          onPressed: () => _showStudyRegisterModal(context),
-                          icon: const Icon(Icons.add_circle),
-                          label: const Text('Adicionar Estudo'),
-                          style: ElevatedButton.styleFrom(
-                            foregroundColor: Colors.white,
-                            backgroundColor: Colors.teal,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(20),
+                  if (selectedIndex == 3) // StatsScreen index
+                    Flexible(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.end, // Alinha os botões à direita
+                        children: [
+                          ElevatedButton.icon(
+                            onPressed: () => _showStudyRegisterModal(context),
+                            icon: const Icon(Icons.add_circle),
+                            label: const Text('Adicionar Estudo'),
+                            style: ElevatedButton.styleFrom(
+                              foregroundColor: Colors.white,
+                              backgroundColor: Colors.teal,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(20),
+                              ),
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        ElevatedButton.icon(
-                          onPressed: () {
-                            showDialog(
-                              context: context,
-                              builder: (context) {
-                                final historyProvider = Provider.of<HistoryProvider>(context, listen: false);
-                                final allSubjectsProvider = Provider.of<AllSubjectsProvider>(context, listen: false);
-                                return FilterModal(
-                                  screen: FilterScreen.history,
-                                  availableCategories: historyProvider.availableCategories,
-                                  availableSubjects: allSubjectsProvider.subjects,
-                                );
-                              },
-                            );
-                          },
-                          icon: const Icon(Icons.filter_list),
-                          label: const Text('Filtros'),
-                          style: ElevatedButton.styleFrom(
-                            foregroundColor: Colors.white,
-                            backgroundColor: Colors.teal,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(20),
+                          const SizedBox(width: 8),
+                          ElevatedButton.icon(
+                            onPressed: () {
+                              showDialog(
+                                context: context,
+                                builder: (context) {
+                                  final historyProvider = Provider.of<HistoryProvider>(context, listen: false);
+                                  final allSubjectsProvider = Provider.of<AllSubjectsProvider>(context, listen: false);
+                                  return FilterModal(
+                                    screen: FilterScreen.stats,
+                                    availableCategories: historyProvider.availableCategories,
+                                    availableSubjects: allSubjectsProvider.subjects,
+                                  );
+                                },
+                              );
+                            },
+                            icon: const Icon(Icons.filter_list),
+                            label: const Text('Filtros'),
+                            style: ElevatedButton.styleFrom(
+                              foregroundColor: Colors.white,
+                              backgroundColor: Colors.teal,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(20),
+                              ),
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 8), // Add some spacing
-                      ],
-                    ),
-                  if (selectedIndex == 8) // SimuladosScreen index
-                    ElevatedButton.icon(
-                      onPressed: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (ctx) => const AddEditSimuladoScreen(),
-                          ),
-                        );
-                      },
-                      icon: const Icon(Icons.add),
-                      label: const Text('Novo Simulado'),
-                      style: ElevatedButton.styleFrom(
-                        foregroundColor: Colors.white,
-                        backgroundColor: Colors.teal,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(20),
-                        ),
+                          const SizedBox(width: 8), // Add some spacing
+                        ],
                       ),
                     ),
-                  if (selectedIndex == 3) // StatsScreen index
-                    Row(
-                      children: [
-                        ElevatedButton.icon(
-                          onPressed: () => _showStudyRegisterModal(context),
-                          icon: const Icon(Icons.add_circle),
-                          label: const Text('Adicionar Estudo'),
-                          style: ElevatedButton.styleFrom(
-                            foregroundColor: Colors.white,
-                            backgroundColor: Colors.teal,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        ElevatedButton.icon(
-                          onPressed: () {
-                            showDialog(
-                              context: context,
-                              builder: (context) {
-                                final historyProvider = Provider.of<HistoryProvider>(context, listen: false);
-                                final allSubjectsProvider = Provider.of<AllSubjectsProvider>(context, listen: false);
-                                return FilterModal(
-                                  screen: FilterScreen.stats,
-                                  availableCategories: historyProvider.availableCategories,
-                                  availableSubjects: allSubjectsProvider.subjects,
-                                );
-                              },
-                            );
-                          },
-                          icon: const Icon(Icons.filter_list),
-                          label: const Text('Filtros'),
-                          style: ElevatedButton.styleFrom(
-                            foregroundColor: Colors.white,
-                            backgroundColor: Colors.teal,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8), // Add some spacing
-                      ],
-                    ),
                   if (selectedIndex == 7) // EditalScreen index
-                    ElevatedButton.icon(
-                      onPressed: () { /* TODO: Implementar modal de registro de estudo */ },
-                      icon: const Icon(Icons.add_circle),
-                      label: const Text('Adicionar Estudo'),
-                      style: ElevatedButton.styleFrom(
-                        foregroundColor: Colors.white,
-                        backgroundColor: Colors.teal,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(20),
+                    Flexible(
+                      child: ElevatedButton.icon(
+                        onPressed: () { /* TODO: Implementar modal de registro de estudo */ },
+                        icon: const Icon(Icons.add_circle),
+                        label: const Text('Adicionar Estudo'),
+                        style: ElevatedButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          backgroundColor: Colors.teal,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(20),
+                          ),
                         ),
                       ),
                     ),
                   if (selectedIndex == 2) // RevisionsScreen index
-                    ElevatedButton.icon(
-                      onPressed: () => _showStudyRegisterModal(context),
-                      icon: const Icon(Icons.add_circle),
-                      label: const Text('Adicionar Estudo'),
-                      style: ElevatedButton.styleFrom(
-                        foregroundColor: Colors.white,
-                        backgroundColor: Colors.teal,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(20),
+                    Flexible(
+                      child: ElevatedButton.icon(
+                        onPressed: () => _showStudyRegisterModal(context),
+                        icon: const Icon(Icons.add_circle),
+                        label: const Text('Adicionar Estudo'),
+                        style: ElevatedButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          backgroundColor: Colors.teal,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(20),
+                          ),
                         ),
                       ),
                     ),
@@ -852,7 +1100,23 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                     Container(
                       color: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF1D2938) : Colors.teal, // Cor de fundo dos cards no modo escuro
                       child: ListTile(
-                        leading: Icon(Icons.folder_open, color: Theme.of(context).brightness == Brightness.light ? Colors.white : Colors.white),
+                        leading: Container( // NEW: Container for circular background
+                          padding: const EdgeInsets.all(8.0), // Adjust padding as needed
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: Colors.teal.withOpacity(0.2), // Light teal background for the circle
+                          ),
+                          child: IconButton(
+                            icon: RotationTransition(
+                              turns: _syncRotationAnimation,
+                              child: const Icon(Icons.sync, color: Colors.teal),
+                            ),
+                            onPressed: () {
+                              _startSyncAnimation();
+                              widget.onQuickSync();
+                            },
+                          ),
+                        ),
                         title: PlanSelector(),
                       ),
                     ),

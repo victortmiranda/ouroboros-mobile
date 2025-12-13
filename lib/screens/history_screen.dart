@@ -207,7 +207,12 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(subjectName, style: Theme.of(context).textTheme.titleMedium),
-                  Text(record.topic, style: Theme.of(context).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.bold)),
+                  Text(
+                    record.topic_texts.isNotEmpty
+                        ? record.topic_texts.join(', ')
+                        : 'N/A', // Exibe todos os tópicos ou 'N/A'
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.bold),
+                  ),
                   const SizedBox(height: 4),
                   Wrap( // Novo Wrap para agrupar os elementos lado a lado
                     spacing: 8.0, // Espaçamento entre os elementos

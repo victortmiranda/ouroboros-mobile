@@ -128,7 +128,8 @@ class EditalScreen extends StatelessWidget {
       plan_id: activePlanProvider.activePlan!.id,
       date: DateTime.now().toIso8601String(),
       subject_id: subject.id,
-      topic: topic.originalTopic.topic_text,
+      topic_texts: [topic.originalTopic.topic_text], // Alterado para lista de textos
+      topic_ids: [topic.originalTopic.id.toString()], // Adicionado para IDs
       study_time: 0,
       category: 'teoria',
       questions: {},
@@ -137,6 +138,7 @@ class EditalScreen extends StatelessWidget {
       count_in_planning: true,
       pages: [],
       videos: [],
+      lastModified: DateTime.now().millisecondsSinceEpoch,
     );
 
     showDialog(
@@ -170,7 +172,8 @@ class EditalScreen extends StatelessWidget {
 
     for (final subject in allSubjects) {
       _ComputedTopic processTopic(Topic topic, int level) {
-        final recordsForTopic = allRecords.where((r) => r.subject_id == subject.id && r.topic == topic.topic_text).toList();
+        // Ajusta a condição para verificar se o tópico está presente em topic_texts
+        final recordsForTopic = allRecords.where((r) => r.subject_id == subject.id && r.topic_texts.contains(topic.topic_text)).toList();
         
         int correct = 0;
         int total = 0;

@@ -122,11 +122,13 @@ class _CustomPlanSelectorState extends State<CustomPlanSelector> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    selectedPlan?.name ?? 'Selecione um Plano',
-                    style: const TextStyle(color: Colors.teal, fontSize: 16.0), // Texto sempre teal
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                  Expanded( // ADDED THIS
+                    child: Text(
+                      selectedPlan?.name ?? 'Selecione um Plano',
+                      style: const TextStyle(color: Colors.teal, fontSize: 16.0), // Texto sempre teal
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ), // ADDED THIS
                   const Icon(Icons.arrow_drop_down, color: Colors.teal), // Ícone sempre teal
                 ],
               ),

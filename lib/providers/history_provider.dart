@@ -106,7 +106,8 @@ class HistoryProvider with ChangeNotifier {
       }
 
       // Topic filter
-      if (_filterProvider.historySelectedTopics.isNotEmpty && !_filterProvider.historySelectedTopics.contains(record.topic)) {
+      // Verifica se algum dos topic_texts do record está na lista de tópicos selecionados
+      if (_filterProvider.historySelectedTopics.isNotEmpty && !record.topic_texts.any((topicText) => _filterProvider.historySelectedTopics.contains(topicText))) {
         return false;
       }
 
@@ -122,7 +123,10 @@ class HistoryProvider with ChangeNotifier {
     if (_authProvider?.currentUser == null) return;
     _setLoading(true);
     try {
-      final recordWithUser = record.copyWith(userId: _authProvider!.currentUser!.name);
+      final recordWithUser = record.copyWith(
+        userId: _authProvider!.currentUser!.name,
+        lastModified: DateTime.now().millisecondsSinceEpoch,
+      );
       await _dbService.createStudyRecord(recordWithUser);
 
       final newReviewRecords = _generateReviewRecords(recordWithUser);
@@ -144,7 +148,10 @@ class HistoryProvider with ChangeNotifier {
         await _reviewProvider.deleteReview(oldReview.id);
       }
 
-      final recordWithUser = record.copyWith(userId: _authProvider!.currentUser!.name);
+      final recordWithUser = record.copyWith(
+        userId: _authProvider!.currentUser!.name,
+        lastModified: DateTime.now().millisecondsSinceEpoch,
+      );
       await _dbService.updateStudyRecord(recordWithUser);
 
       // 2. Gerar e adicionar os novos ReviewRecords
@@ -164,7 +171,7 @@ class HistoryProvider with ChangeNotifier {
       final allRecords = await _dbService.readStudyRecordsForUser(_authProvider!.currentUser!.name);
       StudyRecord? existingRecord;
       try {
-        existingRecord = allRecords.firstWhere((r) => r.subject_id == subjectId && r.topic == topicText);
+        existingRecord = allRecords.firstWhere((r) => r.subject_id == subjectId && r.topic_texts.contains(topicText)); // Alterado
       } catch (e) {
         existingRecord = null;
       }
@@ -176,7 +183,8 @@ class HistoryProvider with ChangeNotifier {
           plan_id: existingRecord.plan_id,
           date: existingRecord.date,
           subject_id: existingRecord.subject_id,
-          topic: existingRecord.topic,
+          topic_texts: existingRecord.topic_texts, // Alterado
+          topic_ids: existingRecord.topic_ids,     // Adicionado
           category: existingRecord.category,
           study_time: existingRecord.study_time,
           questions: existingRecord.questions,
@@ -187,6 +195,7 @@ class HistoryProvider with ChangeNotifier {
           count_in_planning: existingRecord.count_in_planning,
           pages: existingRecord.pages,
           videos: existingRecord.videos,
+          lastModified: DateTime.now().millisecondsSinceEpoch,
         );
         await _dbService.updateStudyRecord(recordToSave);
       } else {
@@ -196,7 +205,8 @@ class HistoryProvider with ChangeNotifier {
           plan_id: planId, // Requires a planId, which is a challenge from the global Edital screen
           date: DateTime.now().toIso8601String(),
           subject_id: subjectId,
-          topic: topicText,
+          topic_texts: [topicText], // Alterado
+          topic_ids: [],             // Adicionado
           category: 'teoria',
           study_time: 0,
           questions: {'correct': 0, 'total': 0},
@@ -205,6 +215,7 @@ class HistoryProvider with ChangeNotifier {
           count_in_planning: false,
           pages: [],
           videos: [],
+          lastModified: DateTime.now().millisecondsSinceEpoch,
         );
         await _dbService.createStudyRecord(newRecord);
       }
@@ -252,10 +263,12 @@ class HistoryProvider with ChangeNotifier {
             status: 'pending',
             original_date: studyRecord.date,
             subject_id: studyRecord.subject_id,
-            topic: studyRecord.topic,
+            // O ReviewRecord agora espera uma lista de tópicos.
+            topics: studyRecord.topic_texts,
             review_period: period,
             completed_date: null,
             ignored: false,
+            lastModified: DateTime.now().millisecondsSinceEpoch,
           ),
         );
       });

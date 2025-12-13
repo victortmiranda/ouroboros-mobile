@@ -86,7 +86,8 @@ class _PlanningScreenState extends State<PlanningScreen> {
           plan_id: activePlanProvider.activePlan!.id,
           date: DateTime.now().toIso8601String(),
           subject_id: subjectId,
-          topic: '', // Deixar o tópico vazio para seleção manual
+          topic_texts: topic != null ? [topic.topic_text] : [], // Preencher com o tópico sugerido ou vazio
+          topic_ids: topic != null ? [topic.id.toString()] : [],   // Preencher com o ID sugerido ou vazio
           study_time: time,
           category: 'teoria',
           questions: {},
@@ -95,6 +96,7 @@ class _PlanningScreenState extends State<PlanningScreen> {
           count_in_planning: true,
           pages: [],
           videos: [],
+          lastModified: DateTime.now().millisecondsSinceEpoch,
         );
 
         showModalBottomSheet(
@@ -133,7 +135,8 @@ class _PlanningScreenState extends State<PlanningScreen> {
       date: DateTime.now().toIso8601String().split('T')[0],
       study_time: session.duration * 60 * 1000,
       subject_id: session.subjectId,
-      topic: '', // Deixar o tópico vazio para seleção manual
+      topic_texts: [], // Vazio, será selecionado no modal
+      topic_ids: [],   // Vazio, será selecionado no modal
       category: 'teoria',
       questions: {},
       review_periods: [],
@@ -141,6 +144,7 @@ class _PlanningScreenState extends State<PlanningScreen> {
       count_in_planning: true,
       pages: [],
       videos: [],
+      lastModified: DateTime.now().millisecondsSinceEpoch,
     );
 
     showModalBottomSheet(

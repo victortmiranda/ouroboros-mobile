@@ -127,7 +127,9 @@ class ActivityCard extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(left: 32.0, top: 4.0, bottom: 8.0),
               child: Text(
-                activity.topic,
+                activity.topic_texts.isNotEmpty
+                    ? activity.topic_texts.join(', ')
+                    : 'N/A', // Exibe todos os tópicos ou 'N/A'
                 style: TextStyle(color: Colors.grey.shade600),
               ),
             ),

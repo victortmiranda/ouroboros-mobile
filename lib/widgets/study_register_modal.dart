@@ -44,7 +44,7 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
   // State variables
   late DateTime _selectedDate;
   Subject? _selectedSubject;
-  Topic? _selectedTopic;
+  List<Topic> _selectedTopics = []; // Agora uma lista para múltiplos tópicos
   String? _selectedCategory;
   final TextEditingController _studyTimeController =
   TextEditingController(text: '00:00:00');
@@ -101,8 +101,11 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
         if (subjects.isNotEmpty) {
           try {
             _selectedSubject = subjects.firstWhere((s) => s.id == record.subject_id);
-            if (record.topic.isNotEmpty) {
-              _selectedTopic = _findTopicByText(_selectedSubject!.topics, record.topic);
+            // Carrega múltiplos tópicos do registro inicial
+            if (record.topic_ids.isNotEmpty) { // Agora usa topic_ids
+              _selectedTopics.addAll(record.topic_ids.map((id) {
+                return _findTopicById(_selectedSubject!.topics, id); // Usa findTopicById
+              }).whereType<Topic>().toList()); // Filtra nulos
             }
           } catch (e) {
             // Handle case where subject is not found
@@ -139,7 +142,7 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
       // Set state directly and synchronously.
       _selectedDate = DateTime.now();
       _selectedSubject = widget.subject;
-      _selectedTopic = null; // Garante que nenhum tópico seja pré-selecionado
+      _selectedTopics = []; // Garante que nenhum tópico seja pré-selecionado na lista
       _studyTimeController.text = _formatTime(widget.initialTime ?? 0);
     }
   }
@@ -196,8 +199,9 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
     if (!timeRegex.hasMatch(_studyTimeController.text)) {
       newErrors['studyTime'] = 'Formato de tempo inválido (HH:MM:SS)';
     }
-    if (_selectedTopic == null && (_selectedSubject?.topics.isNotEmpty ?? false)) {
-      newErrors['topic'] = 'Selecione um tópico';
+    // Alterado para verificar a lista de tópicos
+    if (_selectedTopics.isEmpty && (_selectedSubject?.topics.isNotEmpty ?? false)) {
+      newErrors['topic'] = 'Selecione pelo menos um tópico';
     }
     for (int i = 0; i < _pages.length; i++) {
       final page = _pages[i];
@@ -336,82 +340,50 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
   }
 
   void _showTopicSelector() async {
-    if (_selectedSubject == null) return;
-    final theme = Theme.of(context);
-    final selected = await showDialog<Topic?>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: theme.cardColor,
-        title: Text('Selecione o Tópico', style: TextStyle(color: theme.colorScheme.onSurface)),
-        content: SizedBox(
-          width: double.maxFinite,
-          height: 500,
-          child: ScrollbarTheme(
-            data: ScrollbarThemeData(
-              thumbColor: MaterialStateProperty.all(Colors.teal),
-              radius: const Radius.circular(10),
-              thickness: MaterialStateProperty.all(8),
-            ),
-            child: Scrollbar(
-              thumbVisibility: true,
-              child: ListView(
-                padding: const EdgeInsets.only(right: 16.0),
-                children: _buildTopicItems(_selectedSubject!.topics, 0, theme),
-              ),
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text('Cancelar', style: TextStyle(color: theme.textTheme.bodyLarge?.color)),
-          )
-        ],
-      ),
-    );
-    if (selected != null) {
-      setState(() => _selectedTopic = selected);
-    }
-  }
-
-  List<Widget> _buildTopicItems(List<Topic> topics, int level, ThemeData theme) {
-    List<Widget> items = [];
-    for (var topic in topics) {
-      final isGrouping = topic.is_grouping_topic ?? (topic.sub_topics?.isNotEmpty ?? false);
-      
-      Widget listItem = ListTile(
-        leading: isGrouping ? const Icon(Icons.folder, color: Colors.teal) : null,
-        title: Text(
-          topic.topic_text,
-          style: TextStyle(
-            fontWeight: isGrouping ? FontWeight.bold : FontWeight.normal,
-            color: isGrouping ? theme.colorScheme.onSurface : theme.textTheme.bodyLarge?.color,
-          ),
-        ),
-        contentPadding: EdgeInsets.only(left: level * 16.0, right: 16.0),
-        onTap: isGrouping ? null : () => Navigator.pop(context, topic),
+    if (_selectedSubject == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Por favor, selecione uma disciplina primeiro.')),
       );
-
-      if (isGrouping) {
-        items.add(listItem);
-      } else {
-        items.add(
-          Card(
-            margin: const EdgeInsets.symmetric(vertical: 4.0),
-            color: Theme.of(context).brightness == Brightness.dark
-                ? Colors.teal.shade800 // Cor para o modo escuro
-                : Colors.teal, // Cor para o modo claro
-            child: listItem,
-          ),
-        );
-      }
-
-      if (topic.sub_topics != null) {
-        items.addAll(_buildTopicItems(topic.sub_topics!, level + 1, theme));
-      }
+      return;
     }
-    return items;
+
+    final selectedTopicsFromSheet = await showModalBottomSheet<List<Topic>?>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.6,
+          maxChildSize: 0.9,
+          minChildSize: 0.4,
+          builder: (BuildContext context, ScrollController scrollController) {
+            return _TopicSelectionSheet(
+              topics: _selectedSubject!.topics,
+              scrollController: scrollController,
+              onTopicsSelected: (topics) {
+                Navigator.of(context).pop(topics); // Retorna a lista de tópicos
+              },
+              // Agora passa uma lista de IDs para inicializar a seleção no modal
+              initialSelectedTopicIds: _selectedTopics.map((t) => t.id.toString()).toList(),
+            );
+          },
+        );
+      },
+    );
+
+    if (selectedTopicsFromSheet != null) { // Pode ser uma lista vazia, mas não null
+      setState(() {
+        _selectedTopics = selectedTopicsFromSheet; // Atualiza a lista de tópicos selecionados
+        if (_selectedTopics.isEmpty) {
+          _errors['topic'] = 'Selecione pelo menos um tópico';
+        } else {
+          _errors.remove('topic');
+        }
+      });
+    }
   }
+
+
 
   void _saveForm() {
     if (!_validateForm()) return;
@@ -431,12 +403,13 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     final activePlanProvider = Provider.of<ActivePlanProvider>(context, listen: false);
     final record = StudyRecord(
-      id: widget.initialRecord?.id ?? Uuid().v4(),
+      id: widget.initialRecord?.id ?? const Uuid().v4(),
       userId: authProvider.currentUser!.name,
       plan_id: activePlanProvider.activePlan!.id,
       date: DateFormat('yyyy-MM-dd').format(_selectedDate),
       subject_id: _selectedSubject!.id,
-      topic: _selectedTopic?.topic_text ?? '',
+      topic_texts: _selectedTopics.map((t) => t.topic_text).toList(), // Atualizado
+      topic_ids: _selectedTopics.map((t) => t.id.toString()).toList(), // Adicionado
       category: _selectedCategory!,
       study_time: _parseTime(_studyTimeController.text),
       questions: {
@@ -450,6 +423,7 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
       count_in_planning: _countInPlanning,
       pages: pagesToSave,
       videos: _videos,
+      lastModified: DateTime.now().millisecondsSinceEpoch,
     );
 
     if (widget.initialRecord != null && widget.onUpdate != null) {
@@ -487,6 +461,7 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
             subject: subjectName,
             topics: topics,
             color: color,
+            lastModified: DateTime.now().millisecondsSinceEpoch,
           );
           final allSubjectsProvider = Provider.of<AllSubjectsProvider>(context, listen: false);
           await allSubjectsProvider.updateSubject(updatedSubject);
@@ -528,13 +503,14 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
                   subject: subjectName,
                   topics: topics,
                   color: color,
+                  lastModified: DateTime.now().millisecondsSinceEpoch,
                 );
                 final allSubjectsProvider =
                 Provider.of<AllSubjectsProvider>(context, listen: false);
                 await allSubjectsProvider.addSubject(newSubject);
                 setState(() {
                   _selectedSubject = newSubject;
-                  _selectedTopic = null;
+                  _selectedTopics = []; // Reseta a lista de tópicos
                 });
                 Navigator.pop(context); // Pop the modal sheet
               },
@@ -548,86 +524,116 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return ScrollbarTheme(
-      data: ScrollbarThemeData(
-        thumbColor: MaterialStateProperty.all(Colors.teal),
-        radius: const Radius.circular(10),
-        thickness: MaterialStateProperty.all(8),
-      ),
-      child: Theme(
-        data: theme.copyWith(
-          colorScheme: theme.colorScheme.copyWith(
-            primary: Colors.teal,
-            secondary: Colors.teal,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final bool isDesktop = constraints.maxWidth > 768.0;
+
+        return ScrollbarTheme(
+          data: ScrollbarThemeData(
+            thumbColor: MaterialStateProperty.all(Colors.teal),
+            radius: const Radius.circular(10),
+            thickness: MaterialStateProperty.all(8),
           ),
-          textSelectionTheme: theme.textSelectionTheme.copyWith(
-            cursorColor: Colors.teal,
-            selectionColor: Colors.teal.withOpacity(0.4),
-            selectionHandleColor: Colors.teal,
-          ),
-        ),
-        child: Scaffold(
-          appBar: AppBar(
-            title: Text(
-                widget.initialRecord == null ? 'Adicionar Registro' : 'Editar Registro'),
-            leading: IconButton(
-              icon: const Icon(Icons.close),
-              onPressed: () => Navigator.of(context).pop(),
-            ),
-          ),
-          body: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (widget.justification != null) ...[
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      margin: const EdgeInsets.only(bottom: 16),
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.secondary.withOpacity(0.1),
-                        border: Border(
-                            left: BorderSide(
-                                width: 4, color: theme.colorScheme.secondary)),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Sugestão do Algoritmo',
-                              style: theme.textTheme.titleMedium
-                                  ?.copyWith(fontWeight: FontWeight.bold)),
-                          const SizedBox(height: 4),
-                          Text(widget.justification!),
-                        ],
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 16),
-                  _buildDateField(theme),
-                  const SizedBox(height: 12),
-                  _buildContentSelectors(theme),
-                  const SizedBox(height: 12),
-                  _buildTimeAndTopicSelectors(theme),
-                  const SizedBox(height: 16),
-                  _buildProgressFields(theme),
-                  _buildVideosFields(theme),
-                  const SizedBox(height: 16),
-                  _buildCheckboxes(),
-                  if (_isReviewSchedulingEnabled) _buildReviewPeriods(),
-                  const SizedBox(height: 16),
-                  _buildMaterialField(theme),
-                  const SizedBox(height: 16),
-                  _buildNotesField(theme),
-                ],
+          child: Theme(
+            data: theme.copyWith(
+              colorScheme: theme.colorScheme.copyWith(
+                primary: Colors.teal,
+                secondary: Colors.teal,
+              ),
+              textSelectionTheme: theme.textSelectionTheme.copyWith(
+                cursorColor: Colors.teal,
+                selectionColor: Colors.teal.withOpacity(0.4),
+                selectionHandleColor: Colors.teal,
               ),
             ),
+            child: isDesktop
+                ? Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 768.0), // Limita a largura em desktop
+                child: _buildModalContent(context, theme, isDesktop),
+              ),
+            )
+                : _buildModalContent(context, theme, isDesktop),
           ),
-          bottomSheet: _buildBottomBar(context),
+        );
+      },
+    );
+  }
+
+  Widget _buildModalContent(BuildContext context, ThemeData theme, bool isDesktop) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+            widget.initialRecord == null ? 'Adicionar Registro' : 'Editar Registro'),
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          onPressed: () => Navigator.of(context).pop(),
         ),
       ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (widget.justification != null) ...[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.secondary.withOpacity(0.1),
+                    border: Border(
+                        left: BorderSide(
+                            width: 4, color: theme.colorScheme.secondary)),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Sugestão do Algoritmo',
+                          style: theme.textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 4),
+                      Text(widget.justification!),
+                    ],
+                  ),
+                ),
+              ],
+              const SizedBox(height: 16),
+              isDesktop
+                  ? Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: _buildDateField(theme, isDesktop)),
+                  const SizedBox(width: 12),
+                  Expanded(child: _buildContentSelectors(theme, isDesktop)),
+                ],
+              )
+                  : Column(
+                children: [
+                  _buildDateField(theme, isDesktop),
+                  const SizedBox(height: 12),
+                  _buildContentSelectors(theme, isDesktop),
+                ],
+              ),
+              const SizedBox(height: 12),
+              _buildTimeAndTopicSelectors(theme, isDesktop),
+              const SizedBox(height: 16),
+              _buildProgressFields(theme, isDesktop),
+              _buildVideosFields(theme),
+              const SizedBox(height: 16),
+              _buildCheckboxes(),
+              if (_isReviewSchedulingEnabled) _buildReviewPeriods(),
+              const SizedBox(height: 16),
+              _buildMaterialField(theme),
+              const SizedBox(height: 16),
+              _buildNotesField(theme),
+            ],
+          ),
+        ),
+      ),
+      bottomSheet: _buildBottomBar(context),
     );
   }
 
@@ -635,14 +641,14 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
   // Métodos auxiliares de UI (todos estavam faltando ou incompletos)
   // -----------------------------------------------------------------------
 
-  Widget _buildDateField(ThemeData theme) {
+  Widget _buildDateField(ThemeData theme, bool isDesktop) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
             Flexible(
-              flex: 2,
+              flex: isDesktop ? 1 : 2, // Menor flex para desktop
               child: ElevatedButton(
                 onPressed: () => setState(() => _selectedDate = DateTime.now()),
                 style: ElevatedButton.styleFrom(
@@ -654,7 +660,7 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
             ),
             const SizedBox(width: 4),
             Flexible(
-              flex: 2,
+              flex: isDesktop ? 1 : 2, // Menor flex para desktop
               child: ElevatedButton(
                 onPressed: () => setState(() => _selectedDate =
                     DateTime.now().subtract(const Duration(days: 1))),
@@ -667,7 +673,7 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
             ),
             const SizedBox(width: 4),
             Flexible(
-              flex: 2,
+              flex: isDesktop ? 1 : 2, // Menor flex para desktop
               child: ElevatedButton(
                 onPressed: () async {
                   final picked = await showDatePicker(
@@ -687,7 +693,7 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
             ),
             const SizedBox(width: 4),
             Flexible(
-              flex: 3,
+              flex: isDesktop ? 3 : 3, // Maior flex para desktop
               child: InkWell(
                 onTap: () async {
                   final picked = await showDatePicker(
@@ -731,7 +737,7 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
     );
   }
 
-  Widget _buildContentSelectors(ThemeData theme) {
+  Widget _buildContentSelectors(ThemeData theme, bool isDesktop) {
     return Row(
       children: [
         Expanded(
@@ -833,7 +839,7 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
                 onChanged: (v) {
                   setState(() {
                     _selectedSubject = v;
-                    _selectedTopic = null;
+                    _selectedTopics = []; // Reseta a lista de tópicos
                   });
                 },
               );
@@ -859,11 +865,11 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
     );
   }
 
-  Widget _buildTimeAndTopicSelectors(ThemeData theme) {
+  Widget _buildTimeAndTopicSelectors(ThemeData theme, bool isDesktop) {
     return Row(
       children: [
         Expanded(
-          flex: 1,
+          flex: isDesktop ? 1 : 1, // Menor flex para desktop
           child: TextFormField(
             controller: _studyTimeController,
             decoration: InputDecoration(
@@ -889,12 +895,12 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
         ),
         const SizedBox(width: 8),
         Expanded(
-          flex: 2,
+          flex: isDesktop ? 3 : 2, // Maior flex para desktop
           child: InkWell(
             onTap: _showTopicSelector,
             child: InputDecorator(
               decoration: InputDecoration(
-                labelText: 'Tópico',
+                labelText: 'Tópico(s)', // Alterado label
                 errorText: _errors['topic'],
                 enabledBorder: OutlineInputBorder(
                   borderSide: BorderSide(
@@ -914,12 +920,31 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Expanded(
-                    child: Text(
-                      _selectedTopic?.topic_text ?? 'Selecione um tópico',
-                      style: _selectedTopic == null
-                          ? TextStyle(color: Colors.grey.shade600)
-                          : TextStyle(color: theme.textTheme.bodyLarge?.color), // Use theme text color
+                    child: _selectedTopics.isEmpty // Exibe a lista de tópicos
+                        ? Text(
+                      'Selecione um tópico',
+                      style: TextStyle(color: Colors.grey.shade600),
                       overflow: TextOverflow.ellipsis,
+                    )
+                        : Wrap( // Usa Wrap para exibir múltiplos tópicos como Chips
+                      spacing: 8.0,
+                      runSpacing: 4.0,
+                      children: _selectedTopics.map((topic) => Chip(
+                        label: Text(topic.topic_text),
+                        backgroundColor: Colors.teal.shade50,
+                        labelStyle: TextStyle(color: Colors.teal.shade800),
+                        deleteIcon: const Icon(Icons.close, size: 18), // Make it const
+                        onDeleted: () {
+                          setState(() {
+                            _selectedTopics.remove(topic);
+                            if (_selectedTopics.isEmpty) {
+                              _errors['topic'] = 'Selecione pelo menos um tópico';
+                            } else {
+                              _errors.remove('topic');
+                            }
+                          });
+                        },
+                      )).toList(),
                     ),
                   ),
                   const Icon(Icons.arrow_drop_down, size: 20),
@@ -969,325 +994,329 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
     );
   }
 
-  Widget _buildProgressFields(ThemeData theme) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: MediaQuery.of(context).size.width / 2 - 24,
-            child: Column(
-              children: [
-                const Text("Questões", style: TextStyle(fontSize: 16)),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        children: [
-                          TextFormField(
-                            controller: _correctQuestionsController,
-                            decoration: InputDecoration(
-                              labelText: 'Acertos',
-                              errorText: _errors['questions'],
-                              enabledBorder: OutlineInputBorder(
-                                borderSide: BorderSide(
-                                  color: theme.colorScheme.onSurface,
-                                ),
-                              ),
-                              focusedBorder: const OutlineInputBorder(
-                                borderSide: BorderSide(
-                                  color: Colors.teal,
-                                  width: 2.0,
-                                ),
-                              ),
-                              contentPadding:
-                              const EdgeInsets.symmetric(horizontal: 4, vertical: 16),
-                            ),
-                            keyboardType: TextInputType.number,
-                            textAlign: TextAlign.center,
-                            style: TextStyle(color: theme.textTheme.bodyLarge?.color), // Add this
-                          ),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              SizedBox(
-                                width: 36,
-                                height: 36,
-                                child: ElevatedButton(
-                                  onPressed: () {
-                                    final cur = int.tryParse(_correctQuestionsController.text) ?? 0;
-                                    if (cur > 0) {
-                                      _correctQuestionsController.text = (cur - 1).toString();
-                                    }
-                                  },
-                                  style: ElevatedButton.styleFrom(
-                                    shape: const CircleBorder(),
-                                    padding: const EdgeInsets.all(0),
-                                    backgroundColor: Colors.teal,
-                                    foregroundColor: Colors.white,
-                                  ),
-                                  child: const Icon(Icons.remove),
-                                ),
-                              ),
-                              const SizedBox(width: 4),
-                              SizedBox(
-                                width: 36,
-                                height: 36,
-                                child: ElevatedButton(
-                                  onPressed: () {
-                                    final cur = int.tryParse(_correctQuestionsController.text) ?? 0;
-                                    _correctQuestionsController.text = (cur + 1).toString();
-                                  },
-                                  style: ElevatedButton.styleFrom(
-                                    shape: const CircleBorder(),
-                                    padding: const EdgeInsets.all(0),
-                                    backgroundColor: Colors.teal,
-                                    foregroundColor: Colors.white,
-                                  ),
-                                  child: const Icon(Icons.add),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
+  Widget _buildProgressFields(ThemeData theme, bool isDesktop) {
+    return Column(
+      children: [
+        _buildQuestionsSection(theme),
+        const SizedBox(height: 16),
+        _buildPagesSection(theme),
+      ],
+    );
+  }
+
+  Widget _buildQuestionsSection(ThemeData theme) {
+    return Column(
+      children: [
+        const Text("Questões", style: TextStyle(fontSize: 16)),
+        const SizedBox(height: 8),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                children: [
+                  TextFormField(
+                    controller: _correctQuestionsController,
+                    decoration: InputDecoration(
+                      labelText: 'Acertos',
+                      errorText: _errors['questions'],
+                      enabledBorder: OutlineInputBorder(
+                        borderSide: BorderSide(
+                          color: theme.colorScheme.onSurface,
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Column(
-                        children: [
-                          TextFormField(
-                            controller: _incorrectQuestionsController,
-                            decoration: InputDecoration(
-                              labelText: 'Erros',
-                              enabledBorder: OutlineInputBorder(
-                                borderSide: BorderSide(
-                                  color: theme.colorScheme.onSurface,
-                                ),
-                              ),
-                              focusedBorder: const OutlineInputBorder(
-                                borderSide: BorderSide(
-                                  color: Colors.teal,
-                                  width: 2.0,
-                                ),
-                              ),
-                              contentPadding:
-                              const EdgeInsets.symmetric(horizontal: 4, vertical: 16),
-                            ),
-                            keyboardType: TextInputType.number,
-                            textAlign: TextAlign.center,
-                            style: TextStyle(color: theme.textTheme.bodyLarge?.color), // Add this
-                          ),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              SizedBox(
-                                width: 36,
-                                height: 36,
-                                child: ElevatedButton(
-                                  onPressed: () {
-                                    final cur = int.tryParse(_incorrectQuestionsController.text) ?? 0;
-                                    if (cur > 0) {
-                                      _incorrectQuestionsController.text = (cur - 1).toString();
-                                    }
-                                  },
-                                  style: ElevatedButton.styleFrom(
-                                    shape: const CircleBorder(),
-                                    padding: const EdgeInsets.all(0),
-                                    backgroundColor: Colors.teal,
-                                    foregroundColor: Colors.white,
-                                  ),
-                                  child: const Icon(Icons.remove),
-                                ),
-                              ),
-                              const SizedBox(width: 4),
-                              SizedBox(
-                                width: 36,
-                                height: 36,
-                                child: ElevatedButton(
-                                  onPressed: () {
-                                    final cur = int.tryParse(_incorrectQuestionsController.text) ?? 0;
-                                    _incorrectQuestionsController.text = (cur + 1).toString();
-                                  },
-                                  style: ElevatedButton.styleFrom(
-                                    shape: const CircleBorder(),
-                                    padding: const EdgeInsets.all(0),
-                                    backgroundColor: Colors.teal,
-                                    foregroundColor: Colors.white,
-                                  ),
-                                  child: const Icon(Icons.add),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
+                      focusedBorder: const OutlineInputBorder(
+                        borderSide: BorderSide(
+                          color: Colors.teal,
+                          width: 2.0,
+                        ),
                       ),
+                      contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                     ),
-                  ],
-                ),
-              ],
+                    keyboardType: TextInputType.number,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: theme.textTheme.bodyLarge?.color),
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      SizedBox(
+                        width: 36,
+                        height: 36,
+                        child: ElevatedButton(
+                          onPressed: () {
+                            final cur = int.tryParse(_correctQuestionsController.text) ?? 0;
+                            if (cur > 0) {
+                              _correctQuestionsController.text = (cur - 1).toString();
+                            }
+                          },
+                          style: ElevatedButton.styleFrom(
+                            shape: const CircleBorder(),
+                            padding: const EdgeInsets.all(0),
+                            backgroundColor: Colors.teal,
+                            foregroundColor: Colors.white,
+                          ),
+                          child: const Icon(Icons.remove),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      SizedBox(
+                        width: 36,
+                        height: 36,
+                        child: ElevatedButton(
+                          onPressed: () {
+                            final cur = int.tryParse(_correctQuestionsController.text) ?? 0;
+                            _correctQuestionsController.text = (cur + 1).toString();
+                          },
+                          style: ElevatedButton.styleFrom(
+                            shape: const CircleBorder(),
+                            padding: const EdgeInsets.all(0),
+                            backgroundColor: Colors.teal,
+                            foregroundColor: Colors.white,
+                          ),
+                          child: const Icon(Icons.add),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(width: 16),
-          SizedBox(
-            width: MediaQuery.of(context).size.width / 2 - 24,
-            child: Column(
-              children: [
-                const Text("Páginas", style: TextStyle(fontSize: 16)),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        children: [
-                          TextFormField(
-                            controller: _startPageController,
-                            decoration: InputDecoration(
-                              labelText: 'Início',
-                              errorText: _errors['page-0'],
-                              enabledBorder: OutlineInputBorder(
-                                borderSide: BorderSide(
-                                  color: theme.colorScheme.onSurface,
-                                ),
-                              ),
-                              focusedBorder: const OutlineInputBorder(
-                                borderSide: BorderSide(
-                                  color: Colors.teal,
-                                  width: 2.0,
-                                ),
-                              ),
-                              contentPadding:
-                              const EdgeInsets.symmetric(horizontal: 4, vertical: 16),
-                            ),
-                            keyboardType: TextInputType.number,
-                            textAlign: TextAlign.center,
-                            style: TextStyle(color: theme.textTheme.bodyLarge?.color), // Add this
-                          ),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              SizedBox(
-                                width: 36,
-                                height: 36,
-                                child: ElevatedButton(
-                                  onPressed: () {
-                                    final cur = int.tryParse(_startPageController.text) ?? 0;
-                                    if (cur > 0) {
-                                      _startPageController.text = (cur - 1).toString();
-                                    }
-                                  },
-                                  style: ElevatedButton.styleFrom(
-                                    shape: const CircleBorder(),
-                                    padding: const EdgeInsets.all(0),
-                                    backgroundColor: Colors.teal,
-                                    foregroundColor: Colors.white,
-                                  ),
-                                  child: const Icon(Icons.remove),
-                                ),
-                              ),
-                              const SizedBox(width: 4),
-                              SizedBox(
-                                width: 36,
-                                height: 36,
-                                child: ElevatedButton(
-                                  onPressed: () {
-                                    final cur = int.tryParse(_startPageController.text) ?? 0;
-                                    _startPageController.text = (cur + 1).toString();
-                                  },
-                                  style: ElevatedButton.styleFrom(
-                                    shape: const CircleBorder(),
-                                    padding: const EdgeInsets.all(0),
-                                    backgroundColor: Colors.teal,
-                                    foregroundColor: Colors.white,
-                                  ),
-                                  child: const Icon(Icons.add),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                children: [
+                  TextFormField(
+                    controller: _incorrectQuestionsController,
+                    decoration: InputDecoration(
+                      labelText: 'Erros',
+                      enabledBorder: OutlineInputBorder(
+                        borderSide: BorderSide(
+                          color: theme.colorScheme.onSurface,
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Column(
-                        children: [
-                          TextFormField(
-                            controller: _endPageController,
-                            decoration: InputDecoration(
-                              labelText: 'Fim',
-                              enabledBorder: OutlineInputBorder(
-                                borderSide: BorderSide(
-                                  color: theme.colorScheme.onSurface,
-                                ),
-                              ),
-                              focusedBorder: const OutlineInputBorder(
-                                borderSide: BorderSide(
-                                  color: Colors.teal,
-                                  width: 2.0,
-                                ),
-                              ),
-                              contentPadding:
-                              const EdgeInsets.symmetric(horizontal: 4, vertical: 16),
-                            ),
-                            keyboardType: TextInputType.number,
-                            textAlign: TextAlign.center,
-                            style: TextStyle(color: theme.textTheme.bodyLarge?.color), // Add this
-                          ),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              SizedBox(
-                                width: 36,
-                                height: 36,
-                                child: ElevatedButton(
-                                  onPressed: () {
-                                    final cur = int.tryParse(_endPageController.text) ?? 0;
-                                    if (cur > 0) {
-                                      _endPageController.text = (cur - 1).toString();
-                                    }
-                                  },
-                                  style: ElevatedButton.styleFrom(
-                                    shape: const CircleBorder(),
-                                    padding: const EdgeInsets.all(0),
-                                    backgroundColor: Colors.teal,
-                                    foregroundColor: Colors.white,
-                                  ),
-                                  child: const Icon(Icons.remove),
-                                ),
-                              ),
-                              const SizedBox(width: 4),
-                              SizedBox(
-                                width: 36,
-                                height: 36,
-                                child: ElevatedButton(
-                                  onPressed: () {
-                                    final cur = int.tryParse(_endPageController.text) ?? 0;
-                                    _endPageController.text = (cur + 1).toString();
-                                  },
-                                  style: ElevatedButton.styleFrom(
-                                    shape: const CircleBorder(),
-                                    padding: const EdgeInsets.all(0),
-                                    backgroundColor: Colors.teal,
-                                    foregroundColor: Colors.white,
-                                  ),
-                                  child: const Icon(Icons.add),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
+                      focusedBorder: const OutlineInputBorder(
+                        borderSide: BorderSide(
+                          color: Colors.teal,
+                          width: 2.0,
+                        ),
                       ),
+                      contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                     ),
-                  ],
-                ),
-              ],
+                    keyboardType: TextInputType.number,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: theme.textTheme.bodyLarge?.color),
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      SizedBox(
+                        width: 36,
+                        height: 36,
+                        child: ElevatedButton(
+                          onPressed: () {
+                            final cur = int.tryParse(_incorrectQuestionsController.text) ?? 0;
+                            if (cur > 0) {
+                              _incorrectQuestionsController.text = (cur - 1).toString();
+                            }
+                          },
+                          style: ElevatedButton.styleFrom(
+                            shape: const CircleBorder(),
+                            padding: const EdgeInsets.all(0),
+                            backgroundColor: Colors.teal,
+                            foregroundColor: Colors.white,
+                          ),
+                          child: const Icon(Icons.remove),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      SizedBox(
+                        width: 36,
+                        height: 36,
+                        child: ElevatedButton(
+                          onPressed: () {
+                            final cur = int.tryParse(_incorrectQuestionsController.text) ?? 0;
+                            _incorrectQuestionsController.text = (cur + 1).toString();
+                          },
+                          style: ElevatedButton.styleFrom(
+                            shape: const CircleBorder(),
+                            padding: const EdgeInsets.all(0),
+                            backgroundColor: Colors.teal,
+                            foregroundColor: Colors.white,
+                          ),
+                          child: const Icon(Icons.add),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
-      ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPagesSection(ThemeData theme) {
+    return Column(
+      children: [
+        const Text("Páginas", style: TextStyle(fontSize: 16)),
+        const SizedBox(height: 8),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                children: [
+                  TextFormField(
+                    controller: _startPageController,
+                    decoration: InputDecoration(
+                      labelText: 'Início',
+                      errorText: _errors['page-0'],
+                      enabledBorder: OutlineInputBorder(
+                        borderSide: BorderSide(
+                          color: theme.colorScheme.onSurface,
+                        ),
+                      ),
+                      focusedBorder: const OutlineInputBorder(
+                        borderSide: BorderSide(
+                          color: Colors.teal,
+                          width: 2.0,
+                        ),
+                      ),
+                      contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                    ),
+                    keyboardType: TextInputType.number,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: theme.textTheme.bodyLarge?.color),
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      SizedBox(
+                        width: 36,
+                        height: 36,
+                        child: ElevatedButton(
+                          onPressed: () {
+                            final cur = int.tryParse(_startPageController.text) ?? 0;
+                            if (cur > 0) {
+                              _startPageController.text = (cur - 1).toString();
+                            }
+                          },
+                          style: ElevatedButton.styleFrom(
+                            shape: const CircleBorder(),
+                            padding: const EdgeInsets.all(0),
+                            backgroundColor: Colors.teal,
+                            foregroundColor: Colors.white,
+                          ),
+                          child: const Icon(Icons.remove),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      SizedBox(
+                        width: 36,
+                        height: 36,
+                        child: ElevatedButton(
+                          onPressed: () {
+                            final cur = int.tryParse(_startPageController.text) ?? 0;
+                            _startPageController.text = (cur + 1).toString();
+                          },
+                          style: ElevatedButton.styleFrom(
+                            shape: const CircleBorder(),
+                            padding: const EdgeInsets.all(0),
+                            backgroundColor: Colors.teal,
+                            foregroundColor: Colors.white,
+                          ),
+                          child: const Icon(Icons.add),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                children: [
+                  TextFormField(
+                    controller: _endPageController,
+                    decoration: InputDecoration(
+                      labelText: 'Fim',
+                      enabledBorder: OutlineInputBorder(
+                        borderSide: BorderSide(
+                          color: theme.colorScheme.onSurface,
+                        ),
+                      ),
+                      focusedBorder: const OutlineInputBorder(
+                        borderSide: BorderSide(
+                          color: Colors.teal,
+                          width: 2.0,
+                        ),
+                      ),
+                      contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                    ),
+                    keyboardType: TextInputType.number,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: theme.textTheme.bodyLarge?.color),
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      SizedBox(
+                        width: 36,
+                        height: 36,
+                        child: ElevatedButton(
+                          onPressed: () {
+                            final cur = int.tryParse(_endPageController.text) ?? 0;
+                            if (cur > 0) {
+                              _endPageController.text = (cur - 1).toString();
+                            }
+                          },
+                          style: ElevatedButton.styleFrom(
+                            shape: const CircleBorder(),
+                            padding: const EdgeInsets.all(0),
+                            backgroundColor: Colors.teal,
+                            foregroundColor: Colors.white,
+                          ),
+                          child: const Icon(Icons.remove),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      SizedBox(
+                        width: 36,
+                        height: 36,
+                        child: ElevatedButton(
+                          onPressed: () {
+                            final cur = int.tryParse(_endPageController.text) ?? 0;
+                            _endPageController.text = (cur + 1).toString();
+                          },
+                          style: ElevatedButton.styleFrom(
+                            shape: const CircleBorder(),
+                            padding: const EdgeInsets.all(0),
+                            backgroundColor: Colors.teal,
+                            foregroundColor: Colors.white,
+                          ),
+                          child: const Icon(Icons.add),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 
@@ -1555,6 +1584,210 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
             child: const Text('Salvar'),
           ),
         ],
+      ),
+    );
+  }
+  Topic? _findTopicById(List<Topic> topics, String id) {
+    for (var topic in topics) {
+      if (topic.id.toString() == id) {
+        return topic;
+      }
+      if (topic.sub_topics != null) {
+        final found = _findTopicById(topic.sub_topics!, id);
+        if (found != null) {
+          return found;
+        }
+      }
+    }
+    return null;
+  }
+} // Fim da classe _StudyRegisterModalState
+
+// Novo Widget para renderizar a árvore de tópicos
+class _TopicTreeWidget extends StatelessWidget {
+  final List<Topic> topics;
+  final int level;
+  final ValueChanged<Topic> onToggleTopicSelection; // Alterado
+  final Set<Topic> selectedTopics; // Alterado
+
+  const _TopicTreeWidget({
+    required this.topics,
+    required this.level,
+    required this.onToggleTopicSelection, // Alterado
+    required this.selectedTopics, // Alterado
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    List<Widget> items = [];
+    for (var topic in topics) {
+      final isGrouping = (topic.sub_topics?.isNotEmpty ?? false) || (topic.is_grouping_topic ?? false);
+      
+      if (isGrouping) {
+        items.add(
+          Padding(
+            padding: EdgeInsets.only(left: level * 16.0),
+            child: ExpansionTile(
+              leading: const Icon(Icons.folder, color: Colors.teal),
+              title: Text(
+                topic.topic_text,
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: theme.colorScheme.onSurface,
+                ),
+              ),
+              children: [
+                _TopicTreeWidget(
+                  topics: topic.sub_topics ?? [],
+                  level: level + 1,
+                  onToggleTopicSelection: onToggleTopicSelection, // Ajustado
+                  selectedTopics: selectedTopics, // Ajustado
+                ),
+              ],
+              tilePadding: EdgeInsets.zero,
+              expandedCrossAxisAlignment: CrossAxisAlignment.start,
+              iconColor: Colors.teal,
+              collapsedIconColor: Colors.teal,
+            ),
+          ),
+        );
+      } else {
+        items.add(
+          Padding(
+            padding: EdgeInsets.only(left: level * 16.0 + 4.0, right: 4.0, top: 2.0, bottom: 2.0),
+            child: ListTile(
+              leading: Checkbox(
+                value: selectedTopics.contains(topic), // Ajustado
+                onChanged: (bool? value) {
+                  onToggleTopicSelection(topic); // Ajustado: apenas alterna
+                },
+                activeColor: Colors.teal,
+              ),
+              title: Text(
+                topic.topic_text,
+                style: TextStyle(
+                  color: theme.colorScheme.onSurface,
+                ),
+              ),
+              onTap: () => onToggleTopicSelection(topic), // Ajustado: apenas alterna
+              selected: selectedTopics.contains(topic), // Ajustado
+              selectedTileColor: Colors.teal.withOpacity(0.1),
+            ),
+          ),
+        );
+      }
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: items,
+    );
+  }
+}
+
+// Nova classe para o BottomSheet de seleção de tópico
+class _TopicSelectionSheet extends StatefulWidget {
+  final List<Topic> topics;
+  final ScrollController scrollController;
+  final ValueChanged<List<Topic>> onTopicsSelected; // Alterado para List<Topic>
+  final List<String> initialSelectedTopicIds; // Alterado para lista de IDs
+
+  const _TopicSelectionSheet({
+    required this.topics,
+    required this.scrollController,
+    required this.onTopicsSelected,
+    this.initialSelectedTopicIds = const [], // Default para lista vazia
+  });
+
+  @override
+  State<_TopicSelectionSheet> createState() => _TopicSelectionSheetState();
+}
+
+class _TopicSelectionSheetState extends State<_TopicSelectionSheet> {
+  final Set<Topic> _selectedTopics = {}; // Set para multi-seleção
+
+  @override
+  void initState() {
+    super.initState();
+    // Inicializa o Set com os IDs dos tópicos pré-selecionados
+    for (String id in widget.initialSelectedTopicIds) {
+      final topic = _findTopicById(widget.topics, id);
+      if (topic != null) {
+        _selectedTopics.add(topic);
+      }
+    }
+  }
+
+  // Função auxiliar para encontrar um tópico pelo ID em uma lista hierárquica
+  Topic? _findTopicById(List<Topic> topics, String id) {
+    for (var topic in topics) {
+      if (topic.id.toString() == id) { // Comparar como String
+        return topic;
+      }
+      if (topic.sub_topics != null) {
+        final found = _findTopicById(topic.sub_topics!, id);
+        if (found != null) {
+          return found;
+        }
+      }
+    }
+    return null;
+  }
+
+  void _toggleTopicSelection(Topic topic) {
+    setState(() {
+      if (_selectedTopics.contains(topic)) {
+        _selectedTopics.remove(topic);
+      } else {
+        _selectedTopics.add(topic);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Selecione os Tópicos', style: TextStyle(color: theme.colorScheme.onSurface)),
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          onPressed: () => Navigator.pop(context),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              widget.onTopicsSelected(_selectedTopics.toList()); // Retorna a lista de tópicos selecionados
+            },
+            child: Text(
+              'Confirmar (${_selectedTopics.length})',
+              style: const TextStyle(color: Colors.teal, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+      body: ScrollbarTheme(
+        data: ScrollbarThemeData(
+          thumbColor: MaterialStateProperty.all(Colors.teal),
+          radius: const Radius.circular(10),
+          thickness: MaterialStateProperty.all(8),
+        ),
+        child: Scrollbar(
+          thumbVisibility: true,
+          controller: widget.scrollController,
+          child: ListView(
+            controller: widget.scrollController,
+            padding: const EdgeInsets.only(right: 16.0),
+            children: [
+              _TopicTreeWidget(
+                topics: widget.topics,
+                level: 0,
+                onToggleTopicSelection: _toggleTopicSelection, // Passa o callback de toggle
+                selectedTopics: _selectedTopics, // Passa o Set de tópicos selecionados
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

@@ -139,14 +139,15 @@ class _StatsScreenState extends State<StatsScreen> {
 
                 // Subject filter
                 if (filterProvider.statsSelectedSubjects.isNotEmpty) {
-                  final subject = allSubjectsProvider.subjects.firstWhere((s) => s.id == record.subject_id, orElse: () => Subject(id: '', plan_id: '', subject: '', topics: [], color: ''));
+                  final subject = allSubjectsProvider.subjects.firstWhere((s) => s.id == record.subject_id, orElse: () => Subject(id: '', plan_id: '', subject: '', topics: [], color: '', lastModified: DateTime.now().millisecondsSinceEpoch));
                   if (subject.id.isEmpty || !filterProvider.statsSelectedSubjects.contains(subject.subject)) {
                     return false;
                   }
                 }
 
                 // Topic filter
-                if (filterProvider.statsSelectedTopics.isNotEmpty && !filterProvider.statsSelectedTopics.contains(record.topic)) {
+                // Verifica se algum dos topic_texts do record está na lista de tópicos selecionados
+                if (filterProvider.statsSelectedTopics.isNotEmpty && !record.topic_texts.any((topicText) => filterProvider.statsSelectedTopics.contains(topicText))) {
                   return false;
                 }
 
@@ -615,7 +616,8 @@ class _StatsScreenState extends State<StatsScreen> {
 
                 _ComputedTopic processTopic(Topic topic, int level) {
 
-                  final recordsForTopic = allRecords.where((r) => r.subject_id == subject.id && r.topic == topic.topic_text).toList();
+                  // Ajusta a condição para verificar se o tópico está presente em topic_texts
+                  final recordsForTopic = allRecords.where((r) => r.subject_id == subject.id && r.topic_texts.contains(topic.topic_text)).toList();
 
                   
 

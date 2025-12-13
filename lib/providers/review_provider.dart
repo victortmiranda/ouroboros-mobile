@@ -46,13 +46,15 @@ class ReviewProvider with ChangeNotifier {
 
   Future<void> addReview(ReviewRecord record) async {
     if (_authProvider?.currentUser == null) return;
-    await _dbService.createReviewRecord(record, _authProvider!.currentUser!.name);
+    final newRecord = record.copyWith(lastModified: DateTime.now().millisecondsSinceEpoch);
+    await _dbService.createReviewRecord(newRecord, _authProvider!.currentUser!.name);
     await fetchReviews();
   }
 
   Future<void> updateReview(ReviewRecord record) async {
     if (_authProvider?.currentUser == null) return;
-    await _dbService.updateReviewRecord(record, _authProvider!.currentUser!.name);
+    final updatedRecord = record.copyWith(lastModified: DateTime.now().millisecondsSinceEpoch);
+    await _dbService.updateReviewRecord(updatedRecord, _authProvider!.currentUser!.name);
     await fetchReviews();
   }
 
@@ -76,6 +78,7 @@ class ReviewProvider with ChangeNotifier {
     final updatedRecord = record.copyWith(
       status: 'completed',
       completed_date: DateTime.now().toIso8601String(),
+      lastModified: DateTime.now().millisecondsSinceEpoch,
     );
     await _dbService.updateReviewRecord(updatedRecord, _authProvider!.currentUser!.name);
     await fetchReviews();
@@ -85,6 +88,7 @@ class ReviewProvider with ChangeNotifier {
     if (_authProvider?.currentUser == null) return;
     final updatedRecord = record.copyWith(
       ignored: true,
+      lastModified: DateTime.now().millisecondsSinceEpoch,
     );
     await _dbService.updateReviewRecord(updatedRecord, _authProvider!.currentUser!.name);
     await fetchReviews();
@@ -101,6 +105,7 @@ class ReviewProvider with ChangeNotifier {
       status: 'pending',
       completed_date: null,
       ignored: false,
+      lastModified: DateTime.now().millisecondsSinceEpoch,
     );
     await _dbService.createReviewRecord(newReviewRecord, _authProvider!.currentUser!.name);
     await fetchReviews();
