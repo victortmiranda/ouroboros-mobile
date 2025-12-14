@@ -44,68 +44,73 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
   // State variables
   late DateTime _selectedDate;
   Subject? _selectedSubject;
-  List<Topic> _selectedTopics = []; // Agora uma lista para múltiplos tópicos
+  List<Topic> _allAvailableTopics = []; // Todos os tópicos da disciplina selecionada
+  // NOVO: Lista de TopicProgress para o registro atual
+  List<TopicProgress> _currentTopicsProgress = [];
+  int _activeTopicProgressIndex = 0; // Índice do TopicProgress atualmente visível/editável
+
   String? _selectedCategory;
-  final TextEditingController _studyTimeController =
-  TextEditingController(text: '00:00:00');
-  final TextEditingController _correctQuestionsController =
-  TextEditingController(text: '0');
-  final TextEditingController _incorrectQuestionsController =
-  TextEditingController(text: '0');
-  final TextEditingController _startPageController =
-  TextEditingController(text: '0');
-  final TextEditingController _endPageController =
-  TextEditingController(text: '0');
-  List<Map<String, int>> _pages = [];
-  List<Map<String, String>> _videos = [
-    {'title': '', 'start': '00:00:00', 'end': '00:00:00'}
-  ];
-  final TextEditingController _materialController = TextEditingController();
+  final TextEditingController _studyTimeController = TextEditingController(text: '00:00:00');
+  // Removed old progress controllers as they are now per TopicProgress
   final TextEditingController _notesController = TextEditingController();
-  bool _isTeoriaFinalizada = false;
   bool _countInPlanning = true;
   bool _isReviewSchedulingEnabled = false;
   List<String> _reviewPeriods = [];
   Map<String, String> _errors = {};
 
-  Topic? _findTopicByText(List<Topic> topics, String text) {
-    for (var topic in topics) {
-      if (topic.topic_text == text) {
-        return topic;
-      }
-      if (topic.sub_topics != null) {
-        final found = _findTopicByText(topic.sub_topics!, text);
-        if (found != null) {
-          return found;
-        }
-      }
-    }
-    return null;
-  }
-
+  // Controladores e variáveis de estado temporárias para o TopicProgress ativo
+  late TextEditingController _activeTpCorrectQuestionsController;
+  late TextEditingController _activeTpIncorrectQuestionsController;
+  late TextEditingController _activeTpStartPageController;
+  late TextEditingController _activeTpEndPageController;
+  late List<Map<String, int>> _activeTpPages;
+  late List<Map<String, String>> _activeTpVideos;
+  late bool _activeTpIsTeoriaFinalizada;
+  late ScrollController _horizontalScrollController; // NOVO: Controlador para a rolagem horizontal
   @override
   void initState() {
     super.initState();
 
+    _horizontalScrollController = ScrollController();
+
+
+    // Inicialização dos controladores temporários
+    _activeTpCorrectQuestionsController = TextEditingController(text: '0');
+    _activeTpIncorrectQuestionsController = TextEditingController(text: '0');
+    _activeTpStartPageController = TextEditingController(text: '0');
+    _activeTpEndPageController = TextEditingController(text: '0');
+    _activeTpPages = [];
+    _activeTpVideos = [
+      {'title': '', 'start': '00:00:00', 'end': '00:00:00'}
+    ];
+    _activeTpIsTeoriaFinalizada = false;
+
+    _reviewPeriods = []; // Inicializa vazia ou com base no initialRecord
+
     if (widget.initialRecord != null) {
-      // This block is for editing an existing record.
+      // Editar um registro existente
       final record = widget.initialRecord!;
       _selectedDate = DateTime.parse(record.date);
+      _selectedCategory = record.category;
+      _studyTimeController.text = _formatTime(record.study_time);
+      _notesController.text = record.topicsProgress.isNotEmpty ? record.topicsProgress.first.notes ?? '' : '';
+      _countInPlanning = record.count_in_planning;
+      _reviewPeriods = List.from(record.review_periods);
+      _isReviewSchedulingEnabled = _reviewPeriods.isNotEmpty;
+      _currentTopicsProgress = List.from(record.topicsProgress);
 
-      // We need the provider to find the subject object from the ID.
-      // This needs context, so we do it in a post-frame callback.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         final allSubjectsProvider = Provider.of<AllSubjectsProvider>(context, listen: false);
         final subjects = allSubjectsProvider.subjects.where((s) => s.plan_id == widget.planId).toList();
-        
         if (subjects.isNotEmpty) {
           try {
             _selectedSubject = subjects.firstWhere((s) => s.id == record.subject_id);
-            // Carrega múltiplos tópicos do registro inicial
-            if (record.topic_ids.isNotEmpty) { // Agora usa topic_ids
-              _selectedTopics.addAll(record.topic_ids.map((id) {
-                return _findTopicById(_selectedSubject!.topics, id); // Usa findTopicById
-              }).whereType<Topic>().toList()); // Filtra nulos
+            // Também carregamos todos os tópicos disponíveis para o subject selecionado
+            // para que a seleção de tópicos funcione corretamente.
+            _allAvailableTopics = _selectedSubject!.topics;
+            // Carregar os dados do primeiro TopicProgress (se houver)
+            if (_currentTopicsProgress.isNotEmpty) {
+              _loadActiveTopicProgressIntoControllers();
             }
           } catch (e) {
             // Handle case where subject is not found
@@ -113,52 +118,41 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
         }
         setState(() {}); // Update UI with found subject/topic
       });
-
-      _selectedCategory = record.category;
-      _studyTimeController.text = _formatTime(record.study_time);
-      _correctQuestionsController.text = record.questions['correct']?.toString() ?? '0';
-      _incorrectQuestionsController.text = ((record.questions['total'] ?? 0) - (record.questions['correct'] ?? 0)).toString();
-      _pages = record.pages.isNotEmpty
-          ? record.pages.map((p) => {'start': (p['start'] as num).toInt(), 'end': (p['end'] as num).toInt()}).toList()
-          : [];
-      _startPageController.text = _pages.isNotEmpty ? _pages.first['start']?.toString() ?? '0' : '0';
-      _endPageController.text = _pages.isNotEmpty ? _pages.first['end']?.toString() ?? '0' : '0';
-      _videos = record.videos.isNotEmpty
-          ? record.videos.map<Map<String, String>>((v) => {
-        'title': v['title']?.toString() ?? '',
-        'start': v['start']?.toString() ?? '00:00:00',
-        'end': v['end']?.toString() ?? '00:00:00',
-      }).toList()
-          : [
-        {'title': '', 'start': '00:00:00', 'end': '00:00:00'}
-      ];
-      _notesController.text = record.notes ?? '';
-      _isTeoriaFinalizada = record.teoria_finalizada;
-      _countInPlanning = record.count_in_planning;
-      _reviewPeriods = List.from(record.review_periods);
-      _isReviewSchedulingEnabled = _reviewPeriods.isNotEmpty;
     } else {
-      // This is for creating a new record.
-      // Set state directly and synchronously.
+      // Criar um novo registro
       _selectedDate = DateTime.now();
       _selectedSubject = widget.subject;
-      _selectedTopics = []; // Garante que nenhum tópico seja pré-selecionado na lista
       _studyTimeController.text = _formatTime(widget.initialTime ?? 0);
+      _selectedCategory = 'teoria'; // Default para novos registros
+      _countInPlanning = true;
+      _currentTopicsProgress = []; // Inicia com lista vazia para novos registros
+      // Se um tópico e matéria iniciais foram passados (ex: da sugestão do algoritmo), pré-preencher
+      if (widget.subject != null && widget.topic != null) {
+        _selectedSubject = widget.subject;
+        _allAvailableTopics = _selectedSubject!.topics;
+        _currentTopicsProgress.add(TopicProgress(
+          topicId: widget.topic!.id.toString(),
+          topicText: widget.topic!.topic_text,
+          isTheoryFinished: false, // Default
+          userWeight: widget.topic!.userWeight,
+        ));
+        // Carregar os dados do TopicProgress recém-criado
+        _loadActiveTopicProgressIntoControllers();
+      }
     }
   }
 
   @override
   void dispose() {
+    _horizontalScrollController.dispose(); // Descartar no dispose
     _studyTimeController.dispose();
-    _correctQuestionsController.dispose();
-    _incorrectQuestionsController.dispose();
-    _startPageController.dispose();
-    _endPageController.dispose();
-    _materialController.dispose();
     _notesController.dispose();
+    _activeTpCorrectQuestionsController.dispose();
+    _activeTpIncorrectQuestionsController.dispose();
+    _activeTpStartPageController.dispose();
+    _activeTpEndPageController.dispose();
     super.dispose();
   }
-
   String _formatTime(int ms) {
     if (ms < 0) ms = 0;
     final totalSeconds = ms ~/ 1000;
@@ -176,21 +170,10 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
     return 0;
   }
 
-  void _addPagePair() {
-    setState(() {
-      _pages.add({'start': 0, 'end': 0});
-    });
-  }
-
-  void _addVideoRow() {
-    setState(() {
-      _videos.add({'title': '', 'start': '00:00:00', 'end': '00:00:00'});
-    });
-  }
-
   bool _validateForm() {
     final newErrors = <String, String>{};
     final timeRegex = RegExp(r'^([0-9]?[0-9]):[0-5][0-9]:[0-5][0-9]$');
+
     if (_selectedSubject == null) newErrors['subject'] = 'Selecione uma disciplina';
     if (_selectedCategory == null) newErrors['category'] = 'Selecione uma categoria';
     if (_studyTimeController.text == '00:00:00') {
@@ -199,40 +182,50 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
     if (!timeRegex.hasMatch(_studyTimeController.text)) {
       newErrors['studyTime'] = 'Formato de tempo inválido (HH:MM:SS)';
     }
-    // Alterado para verificar a lista de tópicos
-    if (_selectedTopics.isEmpty && (_selectedSubject?.topics.isNotEmpty ?? false)) {
-      newErrors['topic'] = 'Selecione pelo menos um tópico';
-    }
-    for (int i = 0; i < _pages.length; i++) {
-      final page = _pages[i];
-      if (page['start']! < 0 || page['end']! < 0) {
-        newErrors['page-$i'] = 'Páginas não podem ser negativas';
-      }
-      if (page['end']! < page['start']!) {
-        newErrors['page-$i'] = 'Página final deve ser maior ou igual à inicial';
-      }
-    }
-    for (int i = 0; i < _videos.length; i++) {
-      final video = _videos[i];
-      final hasInfo = video['title']!.trim().isNotEmpty ||
-          video['start'] != '00:00:00' ||
-          video['end'] != '00:00:00';
-      if (hasInfo) {
-        if (video['title']!.trim().isEmpty) {
-          newErrors['video-title-$i'] = 'Título do vídeo é obrigatório';
+
+    if (_currentTopicsProgress.isEmpty) {
+      newErrors['topicsProgress'] = 'Selecione pelo menos um tópico';
+    } else {
+      for (int i = 0; i < _currentTopicsProgress.length; i++) {
+        final tp = _currentTopicsProgress[i];
+        // Validações para as questões
+        if ((tp.questions['total'] ?? 0) < 0 || (tp.questions['correct'] ?? 0) < 0) {
+          newErrors['topicProgress-$i-questions'] = 'Valores de questões não podem ser negativos';
         }
-        if (!timeRegex.hasMatch(video['start']!) ||
-            !timeRegex.hasMatch(video['end']!)) {
-          newErrors['video-time-$i'] = 'Formato de tempo inválido (HH:MM:SS)';
+        if ((tp.questions['correct'] ?? 0) > (tp.questions['total'] ?? 0)) {
+          newErrors['topicProgress-$i-questions'] = 'Acertos não podem ser maiores que o total';
         }
-        if (_parseTime(video['end']!) <= _parseTime(video['start']!)) {
-          newErrors['video-time-$i'] = 'Tempo final deve ser maior que o inicial';
+
+        // Validações para as páginas
+        for (int j = 0; j < tp.pages.length; j++) {
+          final page = tp.pages[j];
+          if (page['start']! < 0 || page['end']! < 0) {
+            newErrors['topicProgress-$i-page-$j'] = 'Páginas não podem ser negativas';
+          }
+          if (page['end']! < page['start']!) {
+            newErrors['topicProgress-$i-page-$j'] = 'Página final deve ser maior ou igual à inicial';
+          }
+        }
+
+        // Validações para os vídeos
+        for (int j = 0; j < tp.videos.length; j++) {
+          final video = tp.videos[j];
+          final hasInfo = video['title']!.trim().isNotEmpty ||
+              video['start'] != '00:00:00' ||
+              video['end'] != '00:00:00';
+          if (hasInfo) {
+            if (video['title']!.trim().isEmpty) {
+              newErrors['topicProgress-$i-video-title-$j'] = 'Título do vídeo é obrigatório';
+            }
+            if (!timeRegex.hasMatch(video['start']!) || !timeRegex.hasMatch(video['end']!)) {
+              newErrors['topicProgress-$i-video-time-$j'] = 'Formato de tempo inválido (HH:MM:SS)';
+            }
+            if (_parseTime(video['end']!) < _parseTime(video['start']!)) {
+              newErrors['topicProgress-$i-video-time-$j'] = 'Tempo final deve ser maior ou igual ao inicial';
+            }
+          }
         }
       }
-    }
-    if ((int.tryParse(_correctQuestionsController.text) ?? 0) < 0 ||
-        (int.tryParse(_incorrectQuestionsController.text) ?? 0) < 0) {
-      newErrors['questions'] = 'Valores não podem ser negativos';
     }
     setState(() => _errors = newErrors);
     return newErrors.isEmpty;
@@ -347,6 +340,9 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
       return;
     }
 
+    // Copiar os tópicos disponíveis para que _TopicSelectionSheet possa manipulá-los
+    _allAvailableTopics = _selectedSubject!.topics;
+
     final selectedTopicsFromSheet = await showModalBottomSheet<List<Topic>?>(
       context: context,
       isScrollControlled: true,
@@ -358,26 +354,45 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
           minChildSize: 0.4,
           builder: (BuildContext context, ScrollController scrollController) {
             return _TopicSelectionSheet(
-              topics: _selectedSubject!.topics,
+              topics: _allAvailableTopics, // Passa todos os tópicos disponíveis
               scrollController: scrollController,
               onTopicsSelected: (topics) {
-                Navigator.of(context).pop(topics); // Retorna a lista de tópicos
+                Navigator.of(context).pop(topics); // Retorna a lista de Topics
               },
-              // Agora passa uma lista de IDs para inicializar a seleção no modal
-              initialSelectedTopicIds: _selectedTopics.map((t) => t.id.toString()).toList(),
+              // Passa os IDs dos TopicProgress atuais para inicializar a seleção
+              initialSelectedTopicIds: _currentTopicsProgress.map((tp) => tp.topicId).toList(),
             );
           },
         );
       },
     );
 
-    if (selectedTopicsFromSheet != null) { // Pode ser uma lista vazia, mas não null
+    if (selectedTopicsFromSheet != null) {
       setState(() {
-        _selectedTopics = selectedTopicsFromSheet; // Atualiza a lista de tópicos selecionados
-        if (_selectedTopics.isEmpty) {
-          _errors['topic'] = 'Selecione pelo menos um tópico';
+        // Mapeia os Topics selecionados de volta para TopicProgress
+        _currentTopicsProgress = selectedTopicsFromSheet.map((topic) {
+          // Tenta encontrar um TopicProgress existente para este tópico
+          final existingTp = _currentTopicsProgress.firstWhere(
+            (tp) => tp.topicId == topic.id.toString(),
+            orElse: () => TopicProgress(
+              topicId: topic.id.toString(),
+              topicText: topic.topic_text,
+              // Initializa com valores padrão para um novo TopicProgress
+              questions: {'total': 0, 'correct': 0},
+              pages: [],
+              videos: [],
+              notes: null,
+              isTheoryFinished: false,
+              userWeight: topic.userWeight,
+            ),
+          );
+          return existingTp;
+        }).toList();
+
+        if (_currentTopicsProgress.isEmpty) {
+          _errors['topicsProgress'] = 'Selecione pelo menos um tópico';
         } else {
-          _errors.remove('topic');
+          _errors.remove('topicsProgress');
         }
       });
     }
@@ -388,41 +403,24 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
   void _saveForm() {
     if (!_validateForm()) return;
 
-    final correct = int.tryParse(_correctQuestionsController.text) ?? 0;
-    final incorrect = int.tryParse(_incorrectQuestionsController.text) ?? 0;
-    final total = correct + incorrect;
-
-    final startPage = int.tryParse(_startPageController.text) ?? 0;
-    final endPage = int.tryParse(_endPageController.text) ?? 0;
-
-    List<Map<String, int>> pagesToSave = [];
-    if (startPage > 0 || endPage > 0) {
-      pagesToSave.add({'start': startPage, 'end': endPage});
-    }
+    // Atualiza o TopicProgress ativo com os dados dos controladores de texto antes de salvar
+    // Isso é crucial para que as últimas edições no formulário sejam refletidas na lista.
+    _updateActiveTopicProgressFromControllers();
 
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     final activePlanProvider = Provider.of<ActivePlanProvider>(context, listen: false);
+
     final record = StudyRecord(
       id: widget.initialRecord?.id ?? const Uuid().v4(),
       userId: authProvider.currentUser!.name,
       plan_id: activePlanProvider.activePlan!.id,
       date: DateFormat('yyyy-MM-dd').format(_selectedDate),
       subject_id: _selectedSubject!.id,
-      topic_texts: _selectedTopics.map((t) => t.topic_text).toList(), // Atualizado
-      topic_ids: _selectedTopics.map((t) => t.id.toString()).toList(), // Adicionado
       category: _selectedCategory!,
       study_time: _parseTime(_studyTimeController.text),
-      questions: {
-        'total': total,
-        'correct': correct,
-      },
-      material: _materialController.text.isEmpty ? null : _materialController.text,
-      notes: _notesController.text.isEmpty ? null : _notesController.text,
+      topicsProgress: _currentTopicsProgress, // NOVO: Usar a lista de TopicProgress
       review_periods: _reviewPeriods,
-      teoria_finalizada: _isTeoriaFinalizada,
       count_in_planning: _countInPlanning,
-      pages: pagesToSave,
-      videos: _videos,
       lastModified: DateTime.now().millisecondsSinceEpoch,
     );
 
@@ -434,11 +432,59 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
     Navigator.of(context).pop();
   }
 
+  // NOVO MÉTODO: Atualiza o TopicProgress ativo com os dados dos controladores de texto
+  void _updateActiveTopicProgressFromControllers() {
+    if (_currentTopicsProgress.isEmpty) return;
+
+    final activeTp = _currentTopicsProgress[_activeTopicProgressIndex];
+
+    final correct = int.tryParse(_activeTpCorrectQuestionsController.text) ?? 0;
+    final incorrect = int.tryParse(_activeTpIncorrectQuestionsController.text) ?? 0;
+    final totalQuestions = correct + incorrect;
+
+    // Constrói a lista de páginas para salvar
+    List<Map<String, int>> pagesToSave = [];
+    final startPage = int.tryParse(_activeTpStartPageController.text) ?? 0;
+    final endPage = int.tryParse(_activeTpEndPageController.text) ?? 0;
+    if (startPage > 0 || endPage > 0) { // Somente adiciona se houver alguma informação
+      pagesToSave.add({'start': startPage, 'end': endPage});
+    }
+
+    // Atualiza o TopicProgress ativo com os valores dos controladores
+    _currentTopicsProgress[_activeTopicProgressIndex] = activeTp.copyWith(
+      questions: {'total': totalQuestions, 'correct': correct},
+      pages: pagesToSave,
+      videos: List.from(_activeTpVideos), // Garante que a lista seja uma cópia
+      notes: _notesController.text.isEmpty ? null : _notesController.text,
+      isTheoryFinished: _activeTpIsTeoriaFinalizada,
+    );
+  }
+
   void _handleDelete() {
     if (widget.initialRecord != null && widget.onDelete != null) {
       widget.onDelete!();
       Navigator.of(context).pop();
     }
+  }
+
+  // NOVO MÉTODO: Adiciona um par de páginas ao TopicProgress ativo
+  void _addPagePair() {
+    // Não precisa de verificação de empty aqui, pois _currentTopicsProgress
+    // sempre terá pelo menos um item se esta seção estiver visível
+    setState(() {
+      _activeTpPages.add({'start': 0, 'end': 0});
+    });
+    // Não chamar _updateActiveTopicProgressFromControllers aqui.
+    // O salvamento real ocorre no _saveForm ou ao mudar de tópico.
+  }
+
+  // NOVO MÉTODO: Adiciona uma linha de vídeo ao TopicProgress ativo
+  void _addVideoRow() {
+    // Não precisa de verificação de empty aqui
+    setState(() {
+      _activeTpVideos.add({'title': '', 'start': '00:00:00', 'end': '00:00:00'});
+    });
+    // Não chamar _updateActiveTopicProgressFromControllers aqui.
   }
 
   void _showEditSubjectModal() {
@@ -510,7 +556,8 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
                 await allSubjectsProvider.addSubject(newSubject);
                 setState(() {
                   _selectedSubject = newSubject;
-                  _selectedTopics = []; // Reseta a lista de tópicos
+                  _currentTopicsProgress = []; // Reseta a lista de TopicProgress
+                  _activeTopicProgressIndex = 0; // Reseta o índice
                 });
                 Navigator.pop(context); // Pop the modal sheet
               },
@@ -620,13 +667,13 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
               const SizedBox(height: 12),
               _buildTimeAndTopicSelectors(theme, isDesktop),
               const SizedBox(height: 16),
+              // NOVO: Seletor de TopicProgress e campos de progresso associados
+              _buildTopicProgressSelector(theme),
               _buildProgressFields(theme, isDesktop),
               _buildVideosFields(theme),
               const SizedBox(height: 16),
               _buildCheckboxes(),
               if (_isReviewSchedulingEnabled) _buildReviewPeriods(),
-              const SizedBox(height: 16),
-              _buildMaterialField(theme),
               const SizedBox(height: 16),
               _buildNotesField(theme),
             ],
@@ -839,7 +886,8 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
                 onChanged: (v) {
                   setState(() {
                     _selectedSubject = v;
-                    _selectedTopics = []; // Reseta a lista de tópicos
+                    _currentTopicsProgress = []; // Reseta a lista de TopicProgress
+                    _activeTopicProgressIndex = 0; // Reseta o índice
                   });
                 },
               );
@@ -920,7 +968,7 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Expanded(
-                    child: _selectedTopics.isEmpty // Exibe a lista de tópicos
+                    child: _currentTopicsProgress.isEmpty // Exibe a lista de tópicos
                         ? Text(
                       'Selecione um tópico',
                       style: TextStyle(color: Colors.grey.shade600),
@@ -929,18 +977,27 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
                         : Wrap( // Usa Wrap para exibir múltiplos tópicos como Chips
                       spacing: 8.0,
                       runSpacing: 4.0,
-                      children: _selectedTopics.map((topic) => Chip(
-                        label: Text(topic.topic_text),
+                      children: _currentTopicsProgress.map((tp) => Chip(
+                        label: Text(tp.topicText),
                         backgroundColor: Colors.teal.shade50,
                         labelStyle: TextStyle(color: Colors.teal.shade800),
                         deleteIcon: const Icon(Icons.close, size: 18), // Make it const
                         onDeleted: () {
                           setState(() {
-                            _selectedTopics.remove(topic);
-                            if (_selectedTopics.isEmpty) {
-                              _errors['topic'] = 'Selecione pelo menos um tópico';
+                            // Remover o TopicProgress da lista e ajustar o índice ativo
+                            final removedIndex = _currentTopicsProgress.indexOf(tp);
+                            _currentTopicsProgress.remove(tp);
+                            if (removedIndex == _activeTopicProgressIndex) {
+                              _activeTopicProgressIndex = (_currentTopicsProgress.isEmpty) ? 0 : (_activeTopicProgressIndex - 1).clamp(0, _currentTopicsProgress.length - 1);
+                              _loadActiveTopicProgressIntoControllers(); // Carrega os dados do novo tópico ativo
+                            } else if (removedIndex < _activeTopicProgressIndex) {
+                              _activeTopicProgressIndex--; // Ajusta o índice se o removido estava antes
+                            }
+
+                            if (_currentTopicsProgress.isEmpty) {
+                              _errors['topicsProgress'] = 'Selecione pelo menos um tópico';
                             } else {
-                              _errors.remove('topic');
+                              _errors.remove('topicsProgress');
                             }
                           });
                         },
@@ -972,26 +1029,101 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
     );
   }
 
-  Widget _buildMaterialField(ThemeData theme) {
-    return TextFormField(
-      controller: _materialController,
-      decoration: InputDecoration(
-        labelText: 'Material',
-        enabledBorder: OutlineInputBorder(
-          borderSide: BorderSide(
-            color: theme.colorScheme.onSurface,
+
+
+  // NOVO WIDGET: Seletor de TopicProgress no modal
+  Widget _buildTopicProgressSelector(ThemeData theme) {
+    if (_currentTopicsProgress.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Progresso por Tópico:',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        SizedBox(
+          height: 48, // Altura fixa para o seletor
+          child: ScrollbarTheme( // Tema para a Scrollbar
+            data: ScrollbarThemeData(
+              thumbColor: MaterialStateProperty.all(Colors.teal),
+              radius: const Radius.circular(10),
+              thickness: MaterialStateProperty.all(8),
+              thumbVisibility: MaterialStateProperty.all(true),
+            ),
+            child: Scrollbar(
+              thumbVisibility: true,
+              controller: _horizontalScrollController,
+              child: ListView.builder(
+                controller: _horizontalScrollController,
+                scrollDirection: Axis.horizontal,
+                itemCount: _currentTopicsProgress.length,
+                itemBuilder: (context, index) {
+                  final tp = _currentTopicsProgress[index];
+                  return ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 150),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                      child: ChoiceChip(
+                        label: Text(
+                          tp.topicText,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: _activeTopicProgressIndex == index
+                                ? Colors.white
+                                : theme.colorScheme.onSurface,
+                          ),
+                        ),
+                        selected: _activeTopicProgressIndex == index,
+                        selectedColor: Colors.teal,
+                        onSelected: (selected) {
+                          if (selected) {
+                            setState(() {
+                              _updateActiveTopicProgressFromControllers();
+                              _activeTopicProgressIndex = index;
+                              _loadActiveTopicProgressIntoControllers();
+                            });
+                          }
+                        },
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
           ),
         ),
-        focusedBorder: const OutlineInputBorder(
-          borderSide: BorderSide(
-            color: Colors.teal,
-            width: 2.0,
-          ),
+        const Divider(),
+        const SizedBox(height: 8),
+        Text(
+          'Editando: ${_currentTopicsProgress[_activeTopicProgressIndex].topicText}',
+          style: TextStyle(
+              fontSize: 14, fontStyle: FontStyle.italic, color: theme.hintColor),
         ),
-        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 16),
-      ),
-      style: TextStyle(color: theme.textTheme.bodyLarge?.color), // Add this
+        const SizedBox(height: 16),
+      ],
     );
+  }
+  // NOVO MÉTODO: Carrega os dados do TopicProgress ativo nos controladores de texto.
+  void _loadActiveTopicProgressIntoControllers() {
+    if (_currentTopicsProgress.isEmpty) return;
+
+    final activeTp = _currentTopicsProgress[_activeTopicProgressIndex];
+
+    _activeTpCorrectQuestionsController.text = (activeTp.questions['correct'] ?? 0).toString();
+    _activeTpIncorrectQuestionsController.text = ((activeTp.questions['total'] ?? 0) - (activeTp.questions['correct'] ?? 0)).toString();
+    _activeTpStartPageController.text = activeTp.pages.isNotEmpty ? (activeTp.pages.first['start'] ?? 0).toString() : '0';
+    _activeTpEndPageController.text = activeTp.pages.isNotEmpty ? (activeTp.pages.first['end'] ?? 0).toString() : '0';
+    _activeTpPages = List.from(activeTp.pages);
+    _activeTpVideos = List.from(activeTp.videos);
+    _activeTpIsTeoriaFinalizada = activeTp.isTheoryFinished;
+    _notesController.text = activeTp.notes ?? '';
+
+    // Chamamos setState para garantir que a UI reflita as mudanças nos controladores.
+    setState(() {});
   }
 
   Widget _buildProgressFields(ThemeData theme, bool isDesktop) {
@@ -1005,6 +1137,8 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
   }
 
   Widget _buildQuestionsSection(ThemeData theme) {
+    if (_currentTopicsProgress.isEmpty) return const SizedBox.shrink(); // Não exibe se não houver TopicProgress
+
     return Column(
       children: [
         const Text("Questões", style: TextStyle(fontSize: 16)),
@@ -1016,10 +1150,10 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
               child: Column(
                 children: [
                   TextFormField(
-                    controller: _correctQuestionsController,
+                    controller: _activeTpCorrectQuestionsController,
                     decoration: InputDecoration(
                       labelText: 'Acertos',
-                      errorText: _errors['questions'],
+                      errorText: _errors['topicProgress-$_activeTopicProgressIndex-questions'],
                       enabledBorder: OutlineInputBorder(
                         borderSide: BorderSide(
                           color: theme.colorScheme.onSurface,
@@ -1037,6 +1171,7 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
                     keyboardType: TextInputType.number,
                     textAlign: TextAlign.center,
                     style: TextStyle(color: theme.textTheme.bodyLarge?.color),
+                    onChanged: (value) => _updateActiveTopicProgressFromControllers(), // Atualiza o TP ao mudar
                   ),
                   const SizedBox(height: 4),
                   Row(
@@ -1047,9 +1182,10 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
                         height: 36,
                         child: ElevatedButton(
                           onPressed: () {
-                            final cur = int.tryParse(_correctQuestionsController.text) ?? 0;
+                            final cur = int.tryParse(_activeTpCorrectQuestionsController.text) ?? 0;
                             if (cur > 0) {
-                              _correctQuestionsController.text = (cur - 1).toString();
+                              _activeTpCorrectQuestionsController.text = (cur - 1).toString();
+                              _updateActiveTopicProgressFromControllers(); // Atualiza o TP
                             }
                           },
                           style: ElevatedButton.styleFrom(
@@ -1067,8 +1203,9 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
                         height: 36,
                         child: ElevatedButton(
                           onPressed: () {
-                            final cur = int.tryParse(_correctQuestionsController.text) ?? 0;
-                            _correctQuestionsController.text = (cur + 1).toString();
+                            final cur = int.tryParse(_activeTpCorrectQuestionsController.text) ?? 0;
+                            _activeTpCorrectQuestionsController.text = (cur + 1).toString();
+                            _updateActiveTopicProgressFromControllers(); // Atualiza o TP
                           },
                           style: ElevatedButton.styleFrom(
                             shape: const CircleBorder(),
@@ -1089,7 +1226,7 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
               child: Column(
                 children: [
                   TextFormField(
-                    controller: _incorrectQuestionsController,
+                    controller: _activeTpIncorrectQuestionsController,
                     decoration: InputDecoration(
                       labelText: 'Erros',
                       enabledBorder: OutlineInputBorder(
@@ -1109,6 +1246,7 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
                     keyboardType: TextInputType.number,
                     textAlign: TextAlign.center,
                     style: TextStyle(color: theme.textTheme.bodyLarge?.color),
+                    onChanged: (value) => _updateActiveTopicProgressFromControllers(), // Atualiza o TP ao mudar
                   ),
                   const SizedBox(height: 4),
                   Row(
@@ -1119,9 +1257,10 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
                         height: 36,
                         child: ElevatedButton(
                           onPressed: () {
-                            final cur = int.tryParse(_incorrectQuestionsController.text) ?? 0;
+                            final cur = int.tryParse(_activeTpIncorrectQuestionsController.text) ?? 0;
                             if (cur > 0) {
-                              _incorrectQuestionsController.text = (cur - 1).toString();
+                              _activeTpIncorrectQuestionsController.text = (cur - 1).toString();
+                              _updateActiveTopicProgressFromControllers(); // Atualiza o TP
                             }
                           },
                           style: ElevatedButton.styleFrom(
@@ -1139,8 +1278,9 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
                         height: 36,
                         child: ElevatedButton(
                           onPressed: () {
-                            final cur = int.tryParse(_incorrectQuestionsController.text) ?? 0;
-                            _incorrectQuestionsController.text = (cur + 1).toString();
+                            final cur = int.tryParse(_activeTpIncorrectQuestionsController.text) ?? 0;
+                            _activeTpIncorrectQuestionsController.text = (cur + 1).toString();
+                            _updateActiveTopicProgressFromControllers(); // Atualiza o TP
                           },
                           style: ElevatedButton.styleFrom(
                             shape: const CircleBorder(),
@@ -1163,6 +1303,8 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
   }
 
   Widget _buildPagesSection(ThemeData theme) {
+    if (_currentTopicsProgress.isEmpty) return const SizedBox.shrink();
+
     return Column(
       children: [
         const Text("Páginas", style: TextStyle(fontSize: 16)),
@@ -1174,10 +1316,10 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
               child: Column(
                 children: [
                   TextFormField(
-                    controller: _startPageController,
+                    controller: _activeTpStartPageController,
                     decoration: InputDecoration(
                       labelText: 'Início',
-                      errorText: _errors['page-0'],
+                      errorText: _errors['topicProgress-$_activeTopicProgressIndex-page-0'], // Erro específico
                       enabledBorder: OutlineInputBorder(
                         borderSide: BorderSide(
                           color: theme.colorScheme.onSurface,
@@ -1195,6 +1337,7 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
                     keyboardType: TextInputType.number,
                     textAlign: TextAlign.center,
                     style: TextStyle(color: theme.textTheme.bodyLarge?.color),
+                    onChanged: (value) => _updateActiveTopicProgressFromControllers(),
                   ),
                   const SizedBox(height: 4),
                   Row(
@@ -1205,9 +1348,10 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
                         height: 36,
                         child: ElevatedButton(
                           onPressed: () {
-                            final cur = int.tryParse(_startPageController.text) ?? 0;
+                            final cur = int.tryParse(_activeTpStartPageController.text) ?? 0;
                             if (cur > 0) {
-                              _startPageController.text = (cur - 1).toString();
+                              _activeTpStartPageController.text = (cur - 1).toString();
+                              _updateActiveTopicProgressFromControllers();
                             }
                           },
                           style: ElevatedButton.styleFrom(
@@ -1225,8 +1369,9 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
                         height: 36,
                         child: ElevatedButton(
                           onPressed: () {
-                            final cur = int.tryParse(_startPageController.text) ?? 0;
-                            _startPageController.text = (cur + 1).toString();
+                            final cur = int.tryParse(_activeTpStartPageController.text) ?? 0;
+                            _activeTpStartPageController.text = (cur + 1).toString();
+                            _updateActiveTopicProgressFromControllers();
                           },
                           style: ElevatedButton.styleFrom(
                             shape: const CircleBorder(),
@@ -1247,7 +1392,7 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
               child: Column(
                 children: [
                   TextFormField(
-                    controller: _endPageController,
+                    controller: _activeTpEndPageController,
                     decoration: InputDecoration(
                       labelText: 'Fim',
                       enabledBorder: OutlineInputBorder(
@@ -1267,6 +1412,7 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
                     keyboardType: TextInputType.number,
                     textAlign: TextAlign.center,
                     style: TextStyle(color: theme.textTheme.bodyLarge?.color),
+                    onChanged: (value) => _updateActiveTopicProgressFromControllers(),
                   ),
                   const SizedBox(height: 4),
                   Row(
@@ -1277,9 +1423,10 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
                         height: 36,
                         child: ElevatedButton(
                           onPressed: () {
-                            final cur = int.tryParse(_endPageController.text) ?? 0;
+                            final cur = int.tryParse(_activeTpEndPageController.text) ?? 0;
                             if (cur > 0) {
-                              _endPageController.text = (cur - 1).toString();
+                              _activeTpEndPageController.text = (cur - 1).toString();
+                              _updateActiveTopicProgressFromControllers();
                             }
                           },
                           style: ElevatedButton.styleFrom(
@@ -1297,8 +1444,9 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
                         height: 36,
                         child: ElevatedButton(
                           onPressed: () {
-                            final cur = int.tryParse(_endPageController.text) ?? 0;
-                            _endPageController.text = (cur + 1).toString();
+                            final cur = int.tryParse(_activeTpEndPageController.text) ?? 0;
+                            _activeTpEndPageController.text = (cur + 1).toString();
+                            _updateActiveTopicProgressFromControllers();
                           },
                           style: ElevatedButton.styleFrom(
                             shape: const CircleBorder(),
@@ -1321,11 +1469,13 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
   }
 
   Widget _buildVideosFields(ThemeData theme) {
+    if (_currentTopicsProgress.isEmpty) return const SizedBox.shrink();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text("Vídeos/Aulas", style: TextStyle(fontSize: 16)),
-        ..._videos.asMap().entries.map((entry) {
+        ..._activeTpVideos.asMap().entries.map((entry) { // Usar _activeTpVideos
           final idx = entry.key;
           final video = entry.value;
           return Padding(
@@ -1338,7 +1488,7 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
                     initialValue: video['title'],
                     decoration: InputDecoration(
                       labelText: 'Título',
-                      errorText: _errors['video-title-$idx'],
+                      errorText: _errors['topicProgress-$_activeTopicProgressIndex-video-title-$idx'], // Erro específico
                       enabledBorder: OutlineInputBorder(
                         borderSide: BorderSide(
                           color: theme.colorScheme.onSurface,
@@ -1353,8 +1503,13 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
                       contentPadding:
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
                     ),
-                    onChanged: (v) => video['title'] = v,
-                    style: TextStyle(color: theme.textTheme.bodyLarge?.color), // Add this
+                    onChanged: (v) {
+                      setState(() {
+                        _activeTpVideos[idx]['title'] = v;
+                        _updateActiveTopicProgressFromControllers(); // Atualiza o TP
+                      });
+                    },
+                    style: TextStyle(color: theme.textTheme.bodyLarge?.color),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -1364,7 +1519,7 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
                     initialValue: video['start'],
                     decoration: InputDecoration(
                       labelText: 'Início',
-                      errorText: _errors['video-time-$idx'],
+                      errorText: _errors['topicProgress-$_activeTopicProgressIndex-video-time-$idx'], // Erro específico
                       enabledBorder: OutlineInputBorder(
                         borderSide: BorderSide(
                           color: theme.colorScheme.onSurface,
@@ -1380,8 +1535,13 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
                     ),
                     keyboardType: TextInputType.datetime,
-                    onChanged: (v) => video['start'] = v,
-                    style: TextStyle(color: theme.textTheme.bodyLarge?.color), // Add this
+                    onChanged: (v) {
+                      setState(() {
+                        _activeTpVideos[idx]['start'] = v;
+                        _updateActiveTopicProgressFromControllers(); // Atualiza o TP
+                      });
+                    },
+                    style: TextStyle(color: theme.textTheme.bodyLarge?.color),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -1406,14 +1566,24 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
                     ),
                     keyboardType: TextInputType.datetime,
-                    onChanged: (v) => video['end'] = v,
-                    style: TextStyle(color: theme.textTheme.bodyLarge?.color), // Add this
+                    onChanged: (v) {
+                      setState(() {
+                        _activeTpVideos[idx]['end'] = v;
+                        _updateActiveTopicProgressFromControllers(); // Atualiza o TP
+                      });
+                    },
+                    style: TextStyle(color: theme.textTheme.bodyLarge?.color),
                   ),
                 ),
-                if (_videos.length > 1)
+                if (_activeTpVideos.length > 1) // Usar _activeTpVideos
                   IconButton(
                     icon: const Icon(Icons.delete),
-                    onPressed: () => setState(() => _videos.removeAt(idx)),
+                    onPressed: () {
+                      setState(() {
+                        _activeTpVideos.removeAt(idx);
+                        _updateActiveTopicProgressFromControllers(); // Atualiza o TP
+                      });
+                    },
                   ),
               ],
             ),
@@ -1468,21 +1638,28 @@ class _StudyRegisterModalState extends State<StudyRegisterModal> {
   Widget _buildCheckboxes() {
     return Column(
       children: [
-        Row(
-          children: [
-            Checkbox(
-              value: _isTeoriaFinalizada,
-              onChanged: (v) => setState(() => _isTeoriaFinalizada = v!),
-              activeColor: Colors.teal,
-            ),
-            Expanded(
-              child: GestureDetector(
-                onTap: () => setState(() => _isTeoriaFinalizada = !_isTeoriaFinalizada),
-                child: const Text('Teoria Finalizada'),
+        if (_currentTopicsProgress.isNotEmpty) // Apenas exibe se houver um TopicProgress ativo
+          Row(
+            children: [
+              Checkbox(
+                value: _activeTpIsTeoriaFinalizada,
+                onChanged: (v) => setState(() {
+                  _activeTpIsTeoriaFinalizada = v!;
+                  _updateActiveTopicProgressFromControllers(); // Atualiza o TP
+                }),
+                activeColor: Colors.teal,
               ),
-            ),
-          ],
-        ),
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => setState(() {
+                    _activeTpIsTeoriaFinalizada = !_activeTpIsTeoriaFinalizada;
+                    _updateActiveTopicProgressFromControllers(); // Atualiza o TP
+                  }),
+                  child: const Text('Teoria Finalizada'),
+                ),
+              ),
+            ],
+          ),
         Row(
           children: [
             Checkbox(

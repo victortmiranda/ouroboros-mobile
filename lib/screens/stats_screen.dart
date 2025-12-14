@@ -82,6 +82,8 @@ class _LeafTopicCount {
   _LeafTopicCount({required this.total, required this.completed});
 }
 
+
+
 // --- Main Screen Widget ---
 class StatsScreen extends StatefulWidget {
   const StatsScreen({super.key});
@@ -121,14 +123,12 @@ class _StatsScreenState extends State<StatsScreen> {
                   return false;
                 }
 
-                // Performance filter
-                final correct = record.questions['correct'] ?? 0;
-                final total = record.questions['total'] ?? 0;
-                final performance = total > 0 ? (correct / total) * 100 : 0.0;
-                if (filterProvider.statsMinPerformance != null && performance < filterProvider.statsMinPerformance!) {
+                // Performance filter (agregando de topicsProgress)
+                final aggregatedProgress = AggregatedTopicProgress.fromStudyRecord(record);
+                if (filterProvider.statsMinPerformance != null && aggregatedProgress.performance < filterProvider.statsMinPerformance!) {
                   return false;
                 }
-                if (filterProvider.statsMaxPerformance != null && performance > filterProvider.statsMaxPerformance!) {
+                if (filterProvider.statsMaxPerformance != null && aggregatedProgress.performance > filterProvider.statsMaxPerformance!) {
                   return false;
                 }
 
@@ -145,10 +145,18 @@ class _StatsScreenState extends State<StatsScreen> {
                   }
                 }
 
-                // Topic filter
-                // Verifica se algum dos topic_texts do record está na lista de tópicos selecionados
-                if (filterProvider.statsSelectedTopics.isNotEmpty && !record.topic_texts.any((topicText) => filterProvider.statsSelectedTopics.contains(topicText))) {
-                  return false;
+                // Topic filter (agregando de topicsProgress)
+                if (filterProvider.statsSelectedTopics.isNotEmpty) {
+                  bool topicMatch = false;
+                  for (var tp in record.topicsProgress) {
+                    if (filterProvider.statsSelectedTopics.contains(tp.topicText)) {
+                      topicMatch = true;
+                      break;
+                    }
+                  }
+                  if (!topicMatch) {
+                    return false;
+                  }
                 }
 
                 return true;
@@ -160,17 +168,21 @@ class _StatsScreenState extends State<StatsScreen> {
               // Calculations
               final int totalStudyTime = records.fold(0, (sum, record) => sum + record.study_time);
               final int totalPagesRead = records.fold(0, (sum, record) {
-                return sum + record.pages.fold(0, (pageSum, page) {
-                  final int start = (page['start'] ?? 0) as int;
-                  final int end = (page['end'] ?? 0) as int;
-                  return pageSum + (end - start);
+                return sum + record.topicsProgress.fold(0, (tpSum, tp) {
+                  return tpSum + tp.pages.fold(0, (pageSum, page) {
+                    final int start = (page['start'] ?? 0) as int;
+                    final int end = (page['end'] ?? 0) as int;
+                    return pageSum + (end - start);
+                  });
                 });
               });
               final int totalVideoTime = records.fold(0, (sum, record) {
-                return sum + record.videos.fold(0, (videoSum, video) {
-                  final start = _parseDuration(video['start'] ?? '00:00:00');
-                  final end = _parseDuration(video['end'] ?? '00:00:00');
-                  return videoSum + (end - start).inMilliseconds;
+                return sum + record.topicsProgress.fold(0, (tpSum, tp) {
+                  return tpSum + tp.videos.fold(0, (videoSum, video) {
+                    final start = _parseDuration(video['start'] ?? '00:00:00');
+                    final end = _parseDuration(video['end'] ?? '00:00:00');
+                    return videoSum + (end - start).inMilliseconds;
+                  });
                 });
               });
 
@@ -184,16 +196,21 @@ class _StatsScreenState extends State<StatsScreen> {
               final computedSubjects = _computeSubjectStats(subjects, records);
               final overallStats = _computeOverallStats(computedSubjects);
 
-              final int totalCorrectQuestions = records.fold(0, (sum, record) => sum + (record.questions['correct'] ?? 0));
-              final int totalQuestions = records.fold(0, (sum, record) => sum + (record.questions['total'] ?? 0));
+              final int totalCorrectQuestions = records.fold(0, (sum, record) {
+                return sum + record.topicsProgress.fold(0, (tpSum, tp) => tpSum + (tp.questions['correct'] ?? 0));
+              });
+              final int totalQuestions = records.fold(0, (sum, record) {
+                return sum + record.topicsProgress.fold(0, (tpSum, tp) => tpSum + (tp.questions['total'] ?? 0));
+              });
 
               // Daily Stats for EvolucaoTempoChart
               final dailyStats = <DateTime, Map<String, int>>{};
               for (var record in records) {
                 final date = DateTime.parse(record.date.split('T')[0]);
-                final correct = record.questions['correct'] ?? 0;
-                final total = record.questions['total'] ?? 0;
-                final incorrect = total - correct;
+                final aggregatedProgress = AggregatedTopicProgress.fromStudyRecord(record);
+                final correct = aggregatedProgress.correctQuestions;
+                final total = aggregatedProgress.totalQuestions;
+                final incorrect = aggregatedProgress.incorrectQuestions;
 
                 dailyStats.update(
                   date,
@@ -606,154 +623,555 @@ class _StatsScreenState extends State<StatsScreen> {
 
           
 
-            List<_ComputedSubject> _computeSubjectStats(List<Subject> allSubjects, List<StudyRecord> allRecords) {
-
-              List<_ComputedSubject> computedList = [];
+                        List<_ComputedSubject> _computeSubjectStats(List<Subject> allSubjects, List<StudyRecord> allRecords) {
 
           
 
-              for (final subject in allSubjects) {
-
-                _ComputedTopic processTopic(Topic topic, int level) {
-
-                  // Ajusta a condição para verificar se o tópico está presente em topic_texts
-                  final recordsForTopic = allRecords.where((r) => r.subject_id == subject.id && r.topic_texts.contains(topic.topic_text)).toList();
-
-                  
-
-                  int correct = 0;
-
-                  int total = 0;
-
-                  bool completed = false;
+            
 
           
 
-                  for (final record in recordsForTopic) {
-
-                    correct += record.questions['correct'] ?? 0;
-
-                    total += record.questions['total'] ?? 0;
-
-                    if (record.teoria_finalizada) {
-
-                      completed = true;
-
-                    }
-
-                  }
+                          List<_ComputedSubject> computedList = [];
 
           
 
-                  final computed = _ComputedTopic(
-
-                    originalTopic: topic,
-
-                    level: level,
-
-                    correctQuestions: correct,
-
-                    totalQuestions: total,
-
-                    isCompleted: completed,
-
-                    subTopics: (topic.sub_topics ?? []).map((st) => processTopic(st, level + 1)).toList(),
-
-                  );
+            
 
           
 
-                  if (computed.isGroupingTopic) {
-
-                    int subCorrect = 0;
-
-                    int subTotal = 0;
-
-                    bool subCompleted = true;
-
-                    for (final sub in computed.subTopics) {
-
-                      subCorrect += sub.correctQuestions;
-
-                      subTotal += sub.totalQuestions;
-
-                      if (!sub.isCompleted) subCompleted = false;
-
-                    }
-
-                    computed.correctQuestions = subCorrect;
-
-                    computed.totalQuestions = subTotal;
-
-                    computed.isCompleted = subCompleted;
-
-                  }
-
-                  
-
-                  return computed;
-
-                }
+                      
 
           
 
-                final topicTree = subject.topics.map((t) => processTopic(t, 0)).toList();
-
-                
-
-                _LeafTopicCount _countLeafTopics(List<_ComputedTopic> topics) {
-
-                  int total = 0;
-
-                  int completed = 0;
-
-                  for (final topic in topics) {
-
-                    if (!topic.isGroupingTopic) {
-
-                      total++;
-
-                      if (topic.isCompleted) completed++;
-
-                    } else {
-
-                      final subCounts = _countLeafTopics(topic.subTopics);
-
-                      total += subCounts.total;
-
-                      completed += subCounts.completed;
-
-                    }
-
-                  }
-
-                  return _LeafTopicCount(total: total, completed: completed);
-
-                }
+            
 
           
 
-                final leafCounts = _countLeafTopics(topicTree);
+                          for (final subject in allSubjects) {
 
           
 
-                computedList.add(_ComputedSubject(
+            
 
-                  originalSubject: subject,
+          
 
-                  topics: topicTree,
+                            _ComputedTopic processTopic(Topic topic, int level) {
 
-                  totalLeafTopics: leafCounts.total,
+          
 
-                  completedLeafTopics: leafCounts.completed,
+            
 
-                ));
+          
 
-              }
+                              // Coleta todos os TopicProgress para este tópico específico
 
-              return computedList;
+          
 
-            }
+                              final topicProgresses = allRecords
+
+          
+
+                                  .where((r) => r.subject_id == subject.id)
+
+          
+
+                                  .expand((r) => r.topicsProgress)
+
+          
+
+                                  .where((tp) => tp.topicText == topic.topic_text)
+
+          
+
+                                  .toList();
+
+          
+
+            
+
+          
+
+                              int correct = 0;
+
+          
+
+                              int total = 0;
+
+          
+
+                              bool completed = false;
+
+          
+
+            
+
+          
+
+                              for (final tp in topicProgresses) {
+
+          
+
+                                correct += tp.questions['correct'] ?? 0;
+
+          
+
+                                total += tp.questions['total'] ?? 0;
+
+          
+
+                                if (tp.isTheoryFinished) {
+
+          
+
+                                  completed = true;
+
+          
+
+                                }
+
+          
+
+                              }
+
+          
+
+            
+
+          
+
+                      
+
+          
+
+            
+
+          
+
+                              final computed = _ComputedTopic(
+
+          
+
+            
+
+          
+
+                                originalTopic: topic,
+
+          
+
+            
+
+          
+
+                                level: level,
+
+          
+
+            
+
+          
+
+                                correctQuestions: correct,
+
+          
+
+            
+
+          
+
+                                totalQuestions: total,
+
+          
+
+            
+
+          
+
+                                isCompleted: completed,
+
+          
+
+            
+
+          
+
+                                subTopics: (topic.sub_topics ?? []).map((st) => processTopic(st, level + 1)).toList(),
+
+          
+
+            
+
+          
+
+                              );
+
+          
+
+            
+
+          
+
+                      
+
+          
+
+            
+
+          
+
+                              if (computed.isGroupingTopic) {
+
+          
+
+            
+
+          
+
+                                int subCorrect = 0;
+
+          
+
+            
+
+          
+
+                                int subTotal = 0;
+
+          
+
+            
+
+          
+
+                                bool subCompleted = true;
+
+          
+
+            
+
+          
+
+                                for (final sub in computed.subTopics) {
+
+          
+
+            
+
+          
+
+                                  subCorrect += sub.correctQuestions;
+
+          
+
+            
+
+          
+
+                                  subTotal += sub.totalQuestions;
+
+          
+
+            
+
+          
+
+                                  if (!sub.isCompleted) subCompleted = false;
+
+          
+
+            
+
+          
+
+                                }
+
+          
+
+            
+
+          
+
+                                computed.correctQuestions = subCorrect;
+
+          
+
+            
+
+          
+
+                                computed.totalQuestions = subTotal;
+
+          
+
+            
+
+          
+
+                                computed.isCompleted = subCompleted;
+
+          
+
+            
+
+          
+
+                              }
+
+          
+
+                              
+
+          
+
+                              return computed;
+
+          
+
+            
+
+          
+
+                            }
+
+          
+
+            
+
+          
+
+                      
+
+          
+
+            
+
+          
+
+                            final topicTree = subject.topics.map((t) => processTopic(t, 0)).toList();
+
+          
+
+            
+
+          
+
+                            
+
+          
+
+            
+
+          
+
+                            _LeafTopicCount _countLeafTopics(List<_ComputedTopic> topics) {
+
+          
+
+            
+
+          
+
+                              int total = 0;
+
+          
+
+            
+
+          
+
+                              int completed = 0;
+
+          
+
+            
+
+          
+
+                              for (final topic in topics) {
+
+          
+
+            
+
+          
+
+                                if (!topic.isGroupingTopic) {
+
+          
+
+            
+
+          
+
+                                  total++;
+
+          
+
+            
+
+          
+
+                                  if (topic.isCompleted) completed++;
+
+          
+
+            
+
+          
+
+                                } else {
+
+          
+
+            
+
+          
+
+                                  final subCounts = _countLeafTopics(topic.subTopics);
+
+          
+
+            
+
+          
+
+                                  total += subCounts.total;
+
+          
+
+            
+
+          
+
+                                  completed += subCounts.completed;
+
+          
+
+            
+
+          
+
+                                }
+
+          
+
+            
+
+          
+
+                              }
+
+          
+
+            
+
+          
+
+                              return _LeafTopicCount(total: total, completed: completed);
+
+          
+
+            
+
+          
+
+                            }
+
+          
+
+            
+
+          
+
+                      
+
+          
+
+            
+
+          
+
+                            final leafCounts = _countLeafTopics(topicTree);
+
+          
+
+            
+
+          
+
+                      
+
+          
+
+            
+
+          
+
+                            computedList.add(_ComputedSubject(
+
+          
+
+            
+
+          
+
+                              originalSubject: subject,
+
+          
+
+            
+
+          
+
+                              topics: topicTree,
+
+          
+
+            
+
+          
+
+                              totalLeafTopics: leafCounts.total,
+
+          
+
+            
+
+          
+
+                              completedLeafTopics: leafCounts.completed,
+
+          
+
+            
+
+          
+
+                            ));
+
+          
+
+            
+
+          
+
+                          }
+
+          
+
+            
+
+          
+
+                          return computedList;
+
+          
+
+            
+
+          
+
+                        }
 
           
 

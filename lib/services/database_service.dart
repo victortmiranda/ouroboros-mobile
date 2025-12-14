@@ -47,7 +47,7 @@ class DatabaseService {
   Future<Database> _initDB(String filePath) async {
     final dbPath = await getApplicationDocumentsDirectory();
     final path = join(dbPath.path, filePath);
-    return await openDatabase(path, version: 16, onCreate: _createDB, onUpgrade: _onUpgrade, onConfigure: _onConfigure); // VERSÃO ATUALIZADA PARA 16
+    return await openDatabase(path, version: 17, onCreate: _createDB, onUpgrade: _onUpgrade, onConfigure: _onConfigure); // VERSÃO ATUALIZADA PARA 17
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -174,6 +174,75 @@ class DatabaseService {
     if (oldVersion < 16) { // Migração para adicionar question_count à master_topics
       await db.execute('ALTER TABLE master_topics ADD COLUMN question_count INTEGER;');
     }
+    if (oldVersion < 17) { // Migração para refatorar StudyRecord com TopicProgress
+      await db.execute('ALTER TABLE study_records ADD COLUMN topicsProgress TEXT NOT NULL DEFAULT \'[]\';');
+
+      // Migrar dados existentes de study_records para a nova estrutura de topicsProgress
+      final List<Map<String, dynamic>> oldRecords = await db.query('study_records');
+
+      for (var oldRecordMap in oldRecords) {
+        final String recordId = oldRecordMap['id'] as String;
+        final List<String> oldTopicTexts = List<String>.from(jsonDecode(oldRecordMap['topic_texts'] ?? '[]'));
+        final List<String> oldTopicIds = List<String>.from(jsonDecode(oldRecordMap['topic_ids'] ?? '[]'));
+        final Map<String, int> oldQuestions = Map<String, int>.from(jsonDecode(oldRecordMap['questions'] ?? '{}'));
+        final List<Map<String, int>> oldPages = (jsonDecode(oldRecordMap['pages'] ?? '[]') as List<dynamic>).map((e) => Map<String, int>.from(e)).toList();
+        final List<Map<String, String>> oldVideos = (jsonDecode(oldRecordMap['videos'] ?? '[]') as List<dynamic>).map((e) => Map<String, String>.from(e)).toList();
+        final String? oldNotes = oldRecordMap['notes'] as String?;
+        final bool oldTeoriaFinalizada = oldRecordMap['teoria_finalizada'] == 1;
+
+        List<TopicProgress> newTopicsProgress = [];
+        // Se houver tópicos, criar um TopicProgress para cada um
+        if (oldTopicIds.isNotEmpty) {
+          for (int i = 0; i < oldTopicIds.length; i++) {
+            newTopicsProgress.add(TopicProgress(
+              topicId: oldTopicIds[i],
+              topicText: oldTopicTexts.length > i ? oldTopicTexts[i] : '', // Fallback para texto
+              questions: oldQuestions, // Duplicar para cada tópico (melhor abordagem na migração)
+              pages: oldPages,         // Duplicar para cada tópico
+              videos: oldVideos,       // Duplicar para cada tópico
+              notes: oldNotes,
+              isTheoryFinished: oldTeoriaFinalizada,
+              userWeight: null, // userWeight não existia no StudyRecord, então é nulo aqui
+            ));
+          }
+        } else {
+          // Se não houver topic_ids, criar um TopicProgress genérico ou ignorar (decisão de negócio)
+          // Para evitar perda de dados, vamos criar um TopicProgress com o subject_id se possível
+          // ou um tópico genérico associado ao study_record_id
+          final String subjectId = oldRecordMap['subject_id'] as String;
+          newTopicsProgress.add(TopicProgress(
+            topicId: subjectId, // Usar subject_id como fallback para topicId
+            topicText: 'Tópico Geral (${oldRecordMap['id']})', // Texto genérico
+            questions: oldQuestions,
+            pages: oldPages,
+            videos: oldVideos,
+            notes: oldNotes,
+            isTheoryFinished: oldTeoriaFinalizada,
+            userWeight: null,
+          ));
+        }
+
+        // Serializar a nova lista de TopicProgress para JSON
+        final String topicsProgressJson = jsonEncode(newTopicsProgress.map((tp) => tp.toMap()).toList());
+
+        // Atualizar o registro no banco de dados com a nova coluna
+        await db.update(
+          'study_records',
+          {'topicsProgress': topicsProgressJson},
+          where: 'id = ?',
+          whereArgs: [recordId],
+        );
+      }
+      // Após migrar os dados, agora podemos dropar as colunas antigas.
+      await db.execute('ALTER TABLE study_records DROP COLUMN topic_texts;');
+      await db.execute('ALTER TABLE study_records DROP COLUMN topic_ids;');
+      await db.execute('ALTER TABLE study_records DROP COLUMN questions;');
+      await db.execute('ALTER TABLE study_records DROP COLUMN material;');
+      await db.execute('ALTER TABLE study_records DROP COLUMN notes;');
+      await db.execute('ALTER TABLE study_records DROP COLUMN teoria_finalizada;');
+      await db.execute('ALTER TABLE study_records DROP COLUMN pages;');
+      await db.execute('ALTER TABLE study_records DROP COLUMN videos;');
+    }
   }
 
   Future<void> _onConfigure(Database db) async {
@@ -256,18 +325,11 @@ class DatabaseService {
         plan_id $textType,
         date $textType,
         subject_id $textType,
-        topic_texts $textType, -- Nova coluna para lista de textos de tópicos (JSON)
-        topic_ids $textType,   -- Nova coluna para lista de IDs de tópicos (JSON)
         category $textType,
         study_time $integerType,
-        questions $textType, -- JSON stored as TEXT
-        material $textTypeNullable,
-        notes $textTypeNullable,
+        topicsProgress TEXT NOT NULL, -- NOVO: Armazena JSON de List<TopicProgress>
         review_periods $textType, -- JSON stored as TEXT
-        teoria_finalizada $boolType,
         count_in_planning $boolType,
-        pages $textType, -- JSON stored as TEXT
-        videos $textType, -- JSON stored as TEXT
         lastModified INTEGER,
         FOREIGN KEY (plan_id) REFERENCES plans (id) ON DELETE CASCADE,
         FOREIGN KEY (subject_id) REFERENCES subjects (id) ON DELETE SET NULL

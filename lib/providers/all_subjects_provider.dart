@@ -95,7 +95,9 @@ class AllSubjectsProvider with ChangeNotifier {
   int getQuestionsForSubject(String subjectId) {
     final studyQuestions = _studyRecords
         .where((record) => record.subject_id == subjectId)
-        .fold<int>(0, (sum, record) => sum + (record.questions['total'] ?? 0));
+        .fold<int>(0, (sum, record) {
+          return sum + record.topicsProgress.fold<int>(0, (tpSum, tp) => tpSum + (tp.questions['total'] ?? 0));
+        });
     final simuladoQuestions = _simuladoRecords
         .expand((record) => record.subjects)
         .where((subject) => subject.subject_id == subjectId)
@@ -109,8 +111,10 @@ class AllSubjectsProvider with ChangeNotifier {
 
     for (final record in _studyRecords) {
       if (record.subject_id == subjectId) {
-        totalCorrect += record.questions['correct'] ?? 0;
-        totalQuestions += record.questions['total'] ?? 0;
+        for (var tp in record.topicsProgress) {
+          totalCorrect += tp.questions['correct'] ?? 0;
+          totalQuestions += tp.questions['total'] ?? 0;
+        }
       }
     }
 
@@ -140,7 +144,9 @@ class AllSubjectsProvider with ChangeNotifier {
   }
 
   int getTotalQuestions() {
-    final studyQuestions = _studyRecords.fold<int>(0, (sum, record) => sum + (record.questions['total'] ?? 0));
+    final studyQuestions = _studyRecords.fold<int>(0, (sum, record) {
+      return sum + record.topicsProgress.fold<int>(0, (tpSum, tp) => tpSum + (tp.questions['total'] ?? 0));
+    });
     final simuladoQuestions = _simuladoRecords
         .expand((record) => record.subjects)
         .fold<int>(0, (sum, subject) => sum + subject.total_questions);
@@ -152,8 +158,10 @@ class AllSubjectsProvider with ChangeNotifier {
     int totalQuestions = 0;
 
     for (final record in _studyRecords) {
-      totalCorrect += record.questions['correct'] ?? 0;
-      totalQuestions += record.questions['total'] ?? 0;
+      for (var tp in record.topicsProgress) {
+        totalCorrect += tp.questions['correct'] ?? 0;
+        totalQuestions += tp.questions['total'] ?? 0;
+      }
     }
 
     for (final record in _simuladoRecords) {

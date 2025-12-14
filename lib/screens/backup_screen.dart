@@ -212,19 +212,6 @@ class _BackupScreenState extends State<BackupScreen> {
     );
   }
 
-  Future<void> _handleSyncSubjects() async {
-    // A importação inicial do catálogo agora é feita automaticamente na criação do DB.
-    // Esta função pode ser revisada se uma funcionalidade de "atualização" for desejada.
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Catálogo de matérias já é sincronizado automaticamente na inicialização.'),
-          backgroundColor: Colors.blueGrey,
-        ),
-      );
-    }
-  }
-
   void _handleDeleteAll() {
     final BuildContext backupScreenContext = context;
     showDialog(
@@ -300,46 +287,9 @@ class _BackupScreenState extends State<BackupScreen> {
             const SizedBox(height: 16),
             _buildImportCard(context),
             const SizedBox(height: 16),
-            _buildSyncCard(context),
-            const SizedBox(height: 16),
             _buildLocalSyncCard(context),
             const SizedBox(height: 16),
             _buildDeleteCard(context),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSyncCard(BuildContext context) {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12.0),
-        side: const BorderSide(color: Colors.blueAccent, width: 2),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildCardTitle(context, Icons.sync, 'Sincronizar Catálogo', Colors.blueAccent),
-            const SizedBox(height: 8),
-            Text(
-              'Carrega e atualiza o catálogo de matérias e assuntos disponíveis no aplicativo. Execute esta ação se as matérias não estiverem aparecendo.',
-              style: TextStyle(color: Colors.grey[600]),
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton.icon(
-              onPressed: _isLoading ? null : _handleSyncSubjects,
-              icon: _isLoading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.blueAccent)) : const Icon(Icons.sync),
-              label: Text(_isLoading ? 'Sincronizando...' : 'Sincronizar Catálogo Agora'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blueAccent,
-                foregroundColor: Colors.white,
-                minimumSize: const Size(double.infinity, 40),
-              ),
-            ),
           ],
         ),
       ),

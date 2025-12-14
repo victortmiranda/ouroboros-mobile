@@ -128,16 +128,21 @@ class EditalScreen extends StatelessWidget {
       plan_id: activePlanProvider.activePlan!.id,
       date: DateTime.now().toIso8601String(),
       subject_id: subject.id,
-      topic_texts: [topic.originalTopic.topic_text], // Alterado para lista de textos
-      topic_ids: [topic.originalTopic.id.toString()], // Adicionado para IDs
+      topicsProgress: [
+        TopicProgress(
+          topicId: topic.originalTopic.id.toString(),
+          topicText: topic.originalTopic.topic_text,
+          isTheoryFinished: topic.isCompleted,
+          questions: {
+            'correct': topic.correctQuestions,
+            'total': topic.totalQuestions,
+          },
+        )
+      ],
       study_time: 0,
       category: 'teoria',
-      questions: {},
       review_periods: [],
-      teoria_finalizada: false,
       count_in_planning: true,
-      pages: [],
-      videos: [],
       lastModified: DateTime.now().millisecondsSinceEpoch,
     );
 
@@ -172,17 +177,21 @@ class EditalScreen extends StatelessWidget {
 
     for (final subject in allSubjects) {
       _ComputedTopic processTopic(Topic topic, int level) {
-        // Ajusta a condição para verificar se o tópico está presente em topic_texts
-        final recordsForTopic = allRecords.where((r) => r.subject_id == subject.id && r.topic_texts.contains(topic.topic_text)).toList();
+        // Coleta todos os TopicProgress para este tópico específico
+        final topicProgresses = allRecords
+            .where((r) => r.subject_id == subject.id)
+            .expand((r) => r.topicsProgress)
+            .where((tp) => tp.topicText == topic.topic_text)
+            .toList();
         
         int correct = 0;
         int total = 0;
         bool completed = false;
 
-        for (final record in recordsForTopic) {
-          correct += record.questions['correct'] ?? 0;
-          total += record.questions['total'] ?? 0;
-          if (record.teoria_finalizada) {
+        for (final tp in topicProgresses) {
+          correct += tp.questions['correct'] ?? 0;
+          total += tp.questions['total'] ?? 0;
+          if (tp.isTheoryFinished) {
             completed = true;
           }
         }

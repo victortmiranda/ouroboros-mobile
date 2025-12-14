@@ -99,6 +99,8 @@ class ActivityCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final aggregatedProgress = AggregatedTopicProgress.fromStudyRecord(activity);
+
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       elevation: 1,
@@ -127,8 +129,8 @@ class ActivityCard extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(left: 32.0, top: 4.0, bottom: 8.0),
               child: Text(
-                activity.topic_texts.isNotEmpty
-                    ? activity.topic_texts.join(', ')
+                aggregatedProgress.topicTexts.isNotEmpty
+                    ? aggregatedProgress.topicTexts.join(', ')
                     : 'N/A', // Exibe todos os tópicos ou 'N/A'
                 style: TextStyle(color: Colors.grey.shade600),
               ),
@@ -164,7 +166,7 @@ class ActivityCard extends StatelessWidget {
                 ),
               ],
             ),
-            if (activity.questions['total'] != null && activity.questions['total']! > 0)
+            if (aggregatedProgress.totalQuestions > 0)
               Row(
                 children: [
                   Icon(MaterialCommunityIcons.comment_question, color: Colors.grey.shade500, size: 16),
@@ -173,7 +175,7 @@ class ActivityCard extends StatelessWidget {
                   const SizedBox(width: 4),
                   Expanded(
                     child: Text(
-                      '${activity.questions['total']} (${activity.questions['correct']} certas)',
+                      '${aggregatedProgress.totalQuestions} (${aggregatedProgress.correctQuestions} certas)',
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),

@@ -81,10 +81,14 @@ class HistoryProvider with ChangeNotifier {
         return false;
       }
 
-      // Performance filter
-      final correct = record.questions['correct'] ?? 0;
-      final total = record.questions['total'] ?? 0;
-      final performance = total > 0 ? (correct / total) * 100 : 0.0;
+      // Performance filter (agregando de topicsProgress)
+      int totalQuestionsSum = 0;
+      int correctQuestionsSum = 0;
+      for (var tp in record.topicsProgress) {
+        totalQuestionsSum += tp.questions['total'] ?? 0;
+        correctQuestionsSum += tp.questions['correct'] ?? 0;
+      }
+      final performance = totalQuestionsSum > 0 ? (correctQuestionsSum / totalQuestionsSum) * 100 : 0.0;
       if (_filterProvider.historyMinPerformance != null && performance < _filterProvider.historyMinPerformance!) {
         return false;
       }
@@ -105,10 +109,18 @@ class HistoryProvider with ChangeNotifier {
         }
       }
 
-      // Topic filter
-      // Verifica se algum dos topic_texts do record está na lista de tópicos selecionados
-      if (_filterProvider.historySelectedTopics.isNotEmpty && !record.topic_texts.any((topicText) => _filterProvider.historySelectedTopics.contains(topicText))) {
-        return false;
+      // Topic filter (agregando de topicsProgress)
+      if (_filterProvider.historySelectedTopics.isNotEmpty) {
+        bool topicMatch = false;
+        for (var tp in record.topicsProgress) {
+          if (_filterProvider.historySelectedTopics.contains(tp.topicText)) {
+            topicMatch = true;
+            break;
+          }
+        }
+        if (!topicMatch) {
+          return false;
+        }
       }
 
       return true;
@@ -170,51 +182,54 @@ class HistoryProvider with ChangeNotifier {
     try {
       final allRecords = await _dbService.readStudyRecordsForUser(_authProvider!.currentUser!.name);
       StudyRecord? existingRecord;
-      try {
-        existingRecord = allRecords.firstWhere((r) => r.subject_id == subjectId && r.topic_texts.contains(topicText)); // Alterado
-      } catch (e) {
-        existingRecord = null;
+
+      // Encontrar o StudyRecord que contém o TopicProgress correspondente
+      for (var record in allRecords) {
+        if (record.subject_id == subjectId) {
+          for (var tp in record.topicsProgress) {
+            if (tp.topicText == topicText) {
+              existingRecord = record;
+              break;
+            }
+          }
+        }
+        if (existingRecord != null) break;
       }
 
       if (existingRecord != null) {
-        final recordToSave = StudyRecord(
-          id: existingRecord.id,
-          userId: _authProvider!.currentUser!.name,
-          plan_id: existingRecord.plan_id,
-          date: existingRecord.date,
-          subject_id: existingRecord.subject_id,
-          topic_texts: existingRecord.topic_texts, // Alterado
-          topic_ids: existingRecord.topic_ids,     // Adicionado
-          category: existingRecord.category,
-          study_time: existingRecord.study_time,
-          questions: existingRecord.questions,
-          material: existingRecord.material,
-          notes: existingRecord.notes,
-          review_periods: existingRecord.review_periods,
-          teoria_finalizada: !existingRecord.teoria_finalizada,
-          count_in_planning: existingRecord.count_in_planning,
-          pages: existingRecord.pages,
-          videos: existingRecord.videos,
+        // Encontrar o TopicProgress específico e modificar isTheoryFinished
+        final List<TopicProgress> updatedTopicsProgress = existingRecord.topicsProgress.map((tp) {
+          if (tp.topicText == topicText) {
+            return tp.copyWith(isTheoryFinished: !tp.isTheoryFinished);
+          }
+          return tp;
+        }).toList();
+
+        final recordToSave = existingRecord.copyWith(
+          topicsProgress: updatedTopicsProgress,
           lastModified: DateTime.now().millisecondsSinceEpoch,
         );
         await _dbService.updateStudyRecord(recordToSave);
       } else {
+        // Se não existir, criar um novo StudyRecord com o TopicProgress
+        // Note: Neste cenário, um StudyRecord tem APENAS um TopicProgress se for para toggling de um único tópico.
+        final newTopicProgress = TopicProgress(
+          topicId: Uuid().v4(), // Será um novo ID para o TopicProgress
+          topicText: topicText,
+          isTheoryFinished: true, // Se estamos toggling para completar, começa como true
+        );
+
         final newRecord = StudyRecord(
           id: Uuid().v4(),
           userId: _authProvider!.currentUser!.name,
-          plan_id: planId, // Requires a planId, which is a challenge from the global Edital screen
+          plan_id: planId,
           date: DateTime.now().toIso8601String(),
           subject_id: subjectId,
-          topic_texts: [topicText], // Alterado
-          topic_ids: [],             // Adicionado
-          category: 'teoria',
-          study_time: 0,
-          questions: {'correct': 0, 'total': 0},
+          category: 'teoria', // Default
+          study_time: 0,      // Default
+          topicsProgress: [newTopicProgress],
           review_periods: [],
-          teoria_finalizada: true,
           count_in_planning: false,
-          pages: [],
-          videos: [],
           lastModified: DateTime.now().millisecondsSinceEpoch,
         );
         await _dbService.createStudyRecord(newRecord);
@@ -264,7 +279,8 @@ class HistoryProvider with ChangeNotifier {
             original_date: studyRecord.date,
             subject_id: studyRecord.subject_id,
             // O ReviewRecord agora espera uma lista de tópicos.
-            topics: studyRecord.topic_texts,
+            // Precisamos coletar os topicText de todos os TopicProgress
+            topics: studyRecord.topicsProgress.map((tp) => tp.topicText).toList(),
             review_period: period,
             completed_date: null,
             ignored: false,

@@ -170,17 +170,18 @@ class _FloatingStopwatchButtonState extends State<FloatingStopwatchButton> with 
                           plan_id: activePlanProvider.activePlan!.id,
                           date: DateTime.now().toIso8601String(),
                           subject_id: subjectId!,
-                          // Agora usa topic_texts e topic_ids como listas
-                          topic_texts: topic != null ? [topic.topic_text] : [],
-                          topic_ids: topic != null ? [topic.id.toString()] : [],
+                          topicsProgress: topic != null
+                              ? [
+                                  TopicProgress(
+                                    topicId: topic.id.toString(),
+                                    topicText: topic.topic_text,
+                                  )
+                                ]
+                              : [],
                           study_time: time,
                           category: 'teoria',
-                          questions: {},
                           review_periods: [],
-                          teoria_finalizada: false,
                           count_in_planning: true,
-                          pages: [],
-                          videos: [],
                           lastModified: DateTime.now().millisecondsSinceEpoch,
                         );
                         

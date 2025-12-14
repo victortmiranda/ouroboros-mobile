@@ -204,16 +204,18 @@ class _PlanDetailScreenContentState extends State<_PlanDetailScreenContent> {
         plan_id: widget.plan.id,
         date: DateTime.now().toIso8601String(),
         subject_id: subjectId!,
-        topic_texts: topic != null ? [topic.topic_text] : [], // Alterado
-        topic_ids: topic != null ? [topic.id.toString()] : [],   // Adicionado
+        topicsProgress: topic != null
+            ? [
+                TopicProgress(
+                  topicId: topic.id.toString(),
+                  topicText: topic.topic_text,
+                )
+              ]
+            : [],
         study_time: time,
         category: 'teoria',
-        questions: {},
         review_periods: [],
-        teoria_finalizada: false,
         count_in_planning: true,
-        pages: [],
-        videos: [],
         lastModified: DateTime.now().millisecondsSinceEpoch,
       );
       Provider.of<HistoryProvider>(context, listen: false).addStudyRecord(record);
@@ -235,15 +237,15 @@ class _PlanDetailScreenContentState extends State<_PlanDetailScreenContent> {
       date: DateTime.now().toIso8601String().split('T')[0],
       study_time: 0,
       subject_id: session.subjectId,
-      topic_texts: [session.subject], // Alterado (aqui session.subject é o nome da matéria, não um tópico em si, mas mantém a estrutura)
-      topic_ids: [], // Adicionado (não há ID de tópico aqui)
+      topicsProgress: [
+        TopicProgress(
+          topicId: Uuid().v4(), // ID genérico, pois não há tópico específico da sessão
+          topicText: session.subject,
+        )
+      ],
       category: 'teoria',
-      questions: {},
       review_periods: [],
-      teoria_finalizada: false,
       count_in_planning: true,
-      pages: [],
-      videos: [],
       lastModified: DateTime.now().millisecondsSinceEpoch,
     );
 

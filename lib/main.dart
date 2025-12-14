@@ -63,7 +63,7 @@ final GlobalKey<ScaffoldMessengerState> snackbarKey = GlobalKey<ScaffoldMessenge
 void main() async { // Make main async
   WidgetsFlutterBinding.ensureInitialized(); // Ensure bindings are initialized
   // TODO: REMOVER ESTA LINHA EM PRODUÇÃO. APAGA O BANCO DE DADOS NA INICIALIZAÇÃO.
-  await DatabaseService.instance.forceDeleteDatabase(); 
+  // await DatabaseService.instance.forceDeleteDatabase(); 
   await initializeDateFormatting('pt_BR', null); // Initialize date formatting for pt_BR
 
   // Adicionado para inicializar a plataforma do webview
@@ -534,16 +534,16 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin { // 
       plan_id: activePlanProvider.activePlan?.id ?? '',
       date: DateTime.now().toIso8601String(),
       subject_id: nextSession.subjectId,
-      topic_texts: [recommendedTopic?.topic_text ?? nextSession.subject], // Usar lista de textos
-      topic_ids: [recommendedTopic?.id?.toString() ?? ''], // Usar lista de IDs, convertendo para String
+      topicsProgress: [
+        TopicProgress(
+          topicId: recommendedTopic?.id?.toString() ?? '',
+          topicText: recommendedTopic?.topic_text ?? nextSession.subject,
+        )
+      ],
       study_time: nextSession.duration * 60 * 1000,
       category: 'teoria',
-      questions: {},
       review_periods: [],
-      teoria_finalizada: false,
       count_in_planning: true,
-      pages: [],
-      videos: [],
       lastModified: DateTime.now().millisecondsSinceEpoch,
     );
 
@@ -662,16 +662,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin { // 
       plan_id: planId,
       date: DateTime.now().toIso8601String(),
       subject_id: '', // Will be selected in the modal
-      topic_texts: [], // Vazio, será selecionado no modal
-      topic_ids: [],   // Vazio, será selecionado no modal
+      topicsProgress: [], // Vazio, será selecionado no modal
       study_time: 0,
       category: 'teoria',
-      questions: {},
       review_periods: [],
-      teoria_finalizada: false,
       count_in_planning: true,
-      pages: [],
-      videos: [],
       lastModified: DateTime.now().millisecondsSinceEpoch,
     );
 

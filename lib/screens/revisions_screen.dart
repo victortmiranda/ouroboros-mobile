@@ -13,21 +13,6 @@ import 'package:ouroboros_mobile/widgets/stopwatch_modal.dart';
 import 'package:ouroboros_mobile/widgets/study_register_modal.dart';
 import 'package:collection/collection.dart';
 
-Topic? _findTopicByText(List<Topic> topics, String text) {
-  for (var topic in topics) {
-    if (topic.topic_text == text) {
-      return topic;
-    }
-    if (topic.sub_topics != null) {
-      final found = _findTopicByText(topic.sub_topics!, text);
-      if (found != null) {
-        return found;
-      }
-    }
-  }
-  return null;
-}
-
 String formatTime(int milliseconds) {
   final totalSeconds = (milliseconds / 1000).floor();
   final hours = (totalSeconds / 3600).floor();
@@ -361,6 +346,22 @@ class _ReviewRecordCard extends StatelessWidget {
     }
   }
 
+  // Função auxiliar para encontrar um Topic por ID em uma lista hierárquica
+  Topic? _findTopicInSubject(List<Topic> topics, String topicId) {
+    for (var topic in topics) {
+      if (topic.id.toString() == topicId) {
+        return topic;
+      }
+      if (topic.sub_topics != null && topic.sub_topics!.isNotEmpty) {
+        final found = _findTopicInSubject(topic.sub_topics!, topicId);
+        if (found != null) {
+          return found;
+        }
+      }
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     final studyRecord = studyRecords.firstWhere(
@@ -373,16 +374,11 @@ class _ReviewRecordCard extends StatelessWidget {
           plan_id: '',
           date: DateTime.now().toIso8601String(),
           subject_id: '',
-          topic_texts: ['Tópico não encontrado'], // Alterado
-          topic_ids: [], // Adicionado
+          topicsProgress: [], // NOVO: Inicializa vazio
           study_time: 0,
           category: 'revisao',
-          questions: {},
           review_periods: [],
-          teoria_finalizada: false,
           count_in_planning: false,
-          pages: [],
-          videos: [],
           lastModified: DateTime.now().millisecondsSinceEpoch,
         );
       },
@@ -398,11 +394,14 @@ class _ReviewRecordCard extends StatelessWidget {
 
       // Lógica para encontrar o registro de estudo que EFETIVAMENTE completou a revisão.
       final completionRecords = studyRecords.where((sr) {
-        if (!reviewRecord.topics.any((reviewTopic) => sr.topic_texts.contains(reviewTopic)) || sr.subject_id != studyRecord.subject_id || sr.category != 'revisao') {
+        // Verifica se algum tópico da revisão foi concluído por este StudyRecord
+        final topicsInCompletionRecord = sr.topicsProgress.map((tp) => tp.topicText).toList();
+        final hasMatchingTopic = reviewRecord.topics.any((reviewTopic) => topicsInCompletionRecord.contains(reviewTopic));
+
+        if (!hasMatchingTopic || sr.subject_id != studyRecord.subject_id || sr.category != 'revisao') {
           return false;
         }
         // Compara apenas a parte da data (ano, mês, dia), ignorando a hora.
-        // A variável completedDate já está disponível do escopo superior.
         final recordDate = DateTime.parse(sr.date);
         return completedDate.year == recordDate.year &&
                completedDate.month == recordDate.month &&
@@ -414,16 +413,18 @@ class _ReviewRecordCard extends StatelessWidget {
 
       // Usa o registro da conclusão se encontrado, senão usa o registro original como fallback.
       final recordToDisplay = completionRecords.isNotEmpty ? completionRecords.first : studyRecord;
+      final aggregatedProgress = AggregatedTopicProgress.fromStudyRecord(recordToDisplay);
 
-      // Agora, usa 'recordToDisplay' para construir o card.
+
+      // Agora, usa 'aggregatedProgress' e 'recordToDisplay' para construir o card.
       final subject = historyProvider.allSubjectsMap[recordToDisplay.subject_id];
       final subjectName = subject?.subject ?? 'Desconhecido';
       final subjectColor = subject != null ? Color(int.parse(subject.color.replaceFirst('#', '0xFF'))) : Colors.grey;
       
       final time = formatTime(recordToDisplay.study_time);
-      final correctQuestions = recordToDisplay.questions['correct'] ?? 0;
-      final totalQuestions = recordToDisplay.questions['total'] ?? 0;
-      final incorrectQuestions = totalQuestions - correctQuestions;
+      final correctQuestions = aggregatedProgress.correctQuestions;
+      final totalQuestions = aggregatedProgress.totalQuestions;
+      final incorrectQuestions = aggregatedProgress.incorrectQuestions;
       final category = categoryDisplayMap[_getStudyCategoryFromString(recordToDisplay.category)] ?? recordToDisplay.category;
 
       return Card(
@@ -448,8 +449,8 @@ class _ReviewRecordCard extends StatelessWidget {
                       Text(subjectName, style: Theme.of(context).textTheme.titleMedium),
                       // Exibe os tópicos como uma lista concatenada, ou 'N/A' se vazio
                       Text(
-                        recordToDisplay.topic_texts.isNotEmpty
-                            ? recordToDisplay.topic_texts.join(', ')
+                        aggregatedProgress.topicTexts.isNotEmpty
+                            ? aggregatedProgress.topicTexts.join(', ')
                             : 'N/A',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.bold),
                       ),
@@ -518,7 +519,8 @@ class _ReviewRecordCard extends StatelessWidget {
       );
     }
 
-    // Layout original para revisões pendentes, atrasadas ou ignoradas.
+    // Layout para revisões pendentes, atrasadas ou ignoradas.
+    // Usaremos AggregatedTopicProgress para mostrar um resumo e um ExpansionTile para detalhes por TopicProgress.
     final scheduledDate = DateTime.parse(reviewRecord.scheduled_date).toUtc();
     final now = DateTime.now();
     final todayUtc = DateTime.utc(now.year, now.month, now.day);
@@ -539,241 +541,229 @@ class _ReviewRecordCard extends StatelessWidget {
       statusColor = Colors.blue.shade700;
     }
 
+    // Usar AggregatedTopicProgress para o resumo
+    final aggregatedProgress = AggregatedTopicProgress.fromStudyRecord(studyRecord);
+
     return Card(
       margin: const EdgeInsets.only(bottom: 12.0),
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       clipBehavior: Clip.antiAlias,
-      child: IntrinsicHeight(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+      child: ExpansionTile( // NOVO: Usar ExpansionTile
+        leading: Container(
+          width: 10,
+          color: subjectColor,
+        ),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              width: 10,
-              color: subjectColor,
+            Text(
+              (historyProvider.allSubjectsMap[studyRecord.subject_id]?.subject ?? 'Desconhecido').toUpperCase(),
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
             ),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(12.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Text(
-                      (historyProvider.allSubjectsMap[studyRecord.subject_id]?.subject ?? 'Desconhecido').toUpperCase(),
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        buildDatePill(context, DateTime.parse(reviewRecord.scheduled_date).toUtc()),
-                        const SizedBox(width: 8),
-                        Expanded(child: Text(reviewRecord.topics.join(', '))),
-                        const SizedBox(width: 8),
-                        Chip(
-                          label: Text(categoryDisplayMap[_getStudyCategoryFromString(studyRecord.category)] ?? 'N/A'),
-                          backgroundColor: categoryColorMap[_getStudyCategoryFromString(studyRecord.category)] ?? Colors.grey[200],
-                          labelStyle: TextStyle(color: Colors.grey[800], fontSize: 12),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 16.0,
-                      runSpacing: 8.0,
-                      children: [
-                        if (studyRecord.study_time > 0)
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [const Icon(Icons.access_time, size: 16), const SizedBox(width: 4), Text(formatTime(studyRecord.study_time))],
-                          ),
-                        if ((studyRecord.questions['total'] ?? 0) > 0)
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.check_circle, size: 16, color: Colors.green),
-                              const SizedBox(width: 4),
-                              Text('${studyRecord.questions['correct'] ?? 0}'),
-                              const SizedBox(width: 8),
-                              const Icon(Icons.cancel, size: 16, color: Colors.red),
-                              const SizedBox(width: 4),
-                              Text('${(studyRecord.questions['total'] ?? 0) - (studyRecord.questions['correct'] ?? 0)}'),
-                            ],
-                          ),
-                        if ((studyRecord.questions['total'] ?? 0) > 0)
-                          Text(
-                            '${((studyRecord.questions['correct'] ?? 0) / (studyRecord.questions['total'] ?? 1) * 100).toStringAsFixed(0)}%',
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 16.0,
-                      runSpacing: 8.0,
-                      children: [
-                        if (studyRecord.material != null && studyRecord.material!.isNotEmpty)
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [const Icon(Icons.book, size: 16), const SizedBox(width: 4), Text(studyRecord.material!)],
-                          ),
-                        if (studyRecord.pages != null && studyRecord.pages!.isNotEmpty)
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [const Icon(Icons.menu_book, size: 16), const SizedBox(width: 4), Text('Páginas: ${studyRecord.pages!.map((p) => '${p['start']}-${p['end']}').join(', ')}')],
-                          ),
-                        if (studyRecord.videos != null && studyRecord.videos!.any((v) => (v['title'] ?? '').isNotEmpty || (v['start'] ?? '00:00:00') != '00:00:00' || (v['end'] ?? '00:00:00') != '00:00:00'))
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [const Icon(Icons.videocam, size: 16), const SizedBox(width: 4), Text('Vídeos: ${studyRecord.videos!.map((v) => '${v['title'] ?? ''} (${v['start'] ?? '00:00:00'} - ${v['end'] ?? '00:00:00'})').join(', ')}')],
-                          ),
-                        if (studyRecord.notes != null && studyRecord.notes!.isNotEmpty)
-                          IconButton(
-                            icon: const Icon(Icons.comment, size: 16),
-                            onPressed: () {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text(studyRecord.notes!)),
-                              );
-                            },
-                            tooltip: 'Ver Comentários',
-                          ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            Column(
-              mainAxisAlignment: MainAxisAlignment.center,
+            const SizedBox(height: 4),
+            Row(
               children: [
-                IconButton(icon: const Icon(Icons.play_arrow, color: Colors.teal), onPressed: () async {
-                  final activePlanProvider = Provider.of<ActivePlanProvider>(context, listen: false);
-                  final stopwatchProvider = Provider.of<StopwatchProvider>(context, listen: false);
-                  final allSubjectsProvider = Provider.of<AllSubjectsProvider>(context, listen: false);
-                  final planId = activePlanProvider.activePlan?.id;
+                buildDatePill(context, DateTime.parse(reviewRecord.scheduled_date).toUtc()),
+                const SizedBox(width: 8),
+                Expanded(child: Text(reviewRecord.topics.join(', '))), // Tópicos da revisão
+              ],
+            ),
+          ],
+        ),
+        subtitle: Wrap( // Resumo do StudyRecord original
+          spacing: 8.0,
+          runSpacing: 4.0,
+          children: [
+            Chip(
+              label: Text(categoryDisplayMap[_getStudyCategoryFromString(studyRecord.category)] ?? 'N/A'),
+              backgroundColor: categoryColorMap[_getStudyCategoryFromString(studyRecord.category)] ?? Colors.grey[200],
+              labelStyle: TextStyle(color: Colors.grey[800], fontSize: 12),
+            ),
+            if (studyRecord.study_time > 0)
+              Chip(
+                label: Text(formatTime(studyRecord.study_time)),
+                backgroundColor: Colors.teal.shade700,
+                labelStyle: const TextStyle(color: Colors.white, fontSize: 10),
+              ),
+            if (aggregatedProgress.totalQuestions > 0)
+              Chip(
+                label: Text('${aggregatedProgress.correctQuestions}/${aggregatedProgress.totalQuestions} acertos'),
+                backgroundColor: aggregatedProgress.performance >= 70 ? Colors.green.shade700 : Colors.red.shade700,
+                labelStyle: const TextStyle(color: Colors.white, fontSize: 10),
+              ),
+          ],
+        ),
+        children: [ // Conteúdo expandido (detalhes por TopicProgress)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Progresso Detalhado:', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                ...studyRecord.topicsProgress.map((tp) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('- ${tp.topicText}', style: const TextStyle(fontWeight: FontWeight.w600)),
+                      if ((tp.questions['total'] ?? 0) > 0)
+                        Text('  Questões: ${tp.questions['correct'] ?? 0}/${tp.questions['total'] ?? 0} (${tp.questions['total']! > 0 ? (tp.questions['correct']! / tp.questions['total']! * 100).toStringAsFixed(0) : 0}%)'),
+                      if (tp.pages.isNotEmpty)
+                        Text('  Páginas: ${tp.pages.map((p) => '${p['start']}-${p['end']}').join(', ')}'),
+                      if (tp.videos.any((v) => (v['title'] ?? '').isNotEmpty))
+                        Text('  Vídeos: ${tp.videos.map((v) => v['title'] ?? '').join(', ')}'),
+                      if (tp.notes != null && tp.notes!.isNotEmpty)
+                        Text('  Notas: ${tp.notes}'),
+                      if (tp.isTheoryFinished)
+                        const Text('  Teoria Finalizada: Sim', style: TextStyle(color: Colors.green)),
+                    ],
+                  ),
+                )).toList(),
+                const SizedBox(height: 16),
+                // Botões de ação para a revisão
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    IconButton(icon: const Icon(Icons.play_arrow, color: Colors.teal), onPressed: () async {
+                      final activePlanProvider = Provider.of<ActivePlanProvider>(context, listen: false);
+                      final stopwatchProvider = Provider.of<StopwatchProvider>(context, listen: false);
+                      final allSubjectsProvider = Provider.of<AllSubjectsProvider>(context, listen: false);
+                      final planId = activePlanProvider.activePlan?.id;
 
-                  if (planId == null) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Nenhum plano de estudo ativo selecionado.')),
-                    );
-                    return;
-                  }
+                      if (planId == null) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Nenhum plano de estudo ativo selecionado.')),
+                        );
+                        return;
+                      }
 
-                  final subject = allSubjectsProvider.subjects.firstWhereOrNull((s) => s.id == studyRecord.subject_id);
-                  final topic = subject != null && reviewRecord.topics.isNotEmpty ? _findTopicByText(subject.topics, reviewRecord.topics.first) : null;
+                      final subject = allSubjectsProvider.subjects.firstWhereOrNull((s) => s.id == studyRecord.subject_id);
+                      // Para o tópico, vamos usar o primeiro topicProgress para fins de contexto no cronômetro
+                      final topicForStopwatch = subject != null && studyRecord.topicsProgress.isNotEmpty
+                          ? _findTopicInSubject(subject.topics, studyRecord.topicsProgress.first.topicId)
+                          : null;
 
-                  stopwatchProvider.setContext(
-                    planId: planId,
-                    subjectId: studyRecord.subject_id,
-                    topic: topic,
-                  );
+                      stopwatchProvider.setContext(
+                        planId: planId,
+                        subjectId: studyRecord.subject_id,
+                        topic: topicForStopwatch,
+                      );
 
-                  final result = await showDialog<Map<String, dynamic>?>( 
-                    context: context,
-                    builder: (ctx) => const StopwatchModal(),
-                  );
+                      final result = await showDialog<Map<String, dynamic>?>(
+                        context: context,
+                        builder: (ctx) => const StopwatchModal(),
+                      );
 
-                  if (result != null) {
-                    final int time = result['time'];
-                    final String? subjectId = result['subjectId'];
-                    final Topic? topic = result['topic'];
+                      if (result != null) {
+                        final int time = result['time'];
+                        final String? returnedSubjectId = result['subjectId'];
+                        final Topic? returnedTopic = result['topic'];
 
-                    if (subjectId != null && topic != null) {
-                      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+                        if (returnedSubjectId != null && returnedTopic != null) {
+                          final authProvider = Provider.of<AuthProvider>(context, listen: false);
+
+                          final newTopicProgressForRecord = TopicProgress(
+                            topicId: returnedTopic.id.toString(),
+                            topicText: returnedTopic.topic_text,
+                            questions: {'total': 0, 'correct': 0}, // Zera para preenchimento manual
+                            pages: [],
+                            videos: [],
+                            notes: null,
+                            isTheoryFinished: false,
+                            userWeight: returnedTopic.userWeight,
+                          );
+
+                          final newRecord = StudyRecord(
+                            id: const Uuid().v4(),
+                            userId: authProvider.currentUser!.name,
+                            plan_id: planId,
+                            date: DateTime.now().toIso8601String().split('T')[0],
+                            subject_id: returnedSubjectId,
+                            category: 'revisao',
+                            study_time: time,
+                            topicsProgress: [newTopicProgressForRecord], // Um TopicProgress para o que foi estudado
+                            review_periods: [],
+                            count_in_planning: true,
+                            lastModified: DateTime.now().millisecondsSinceEpoch,
+                          );
+
+                          await showModalBottomSheet(
+                            context: context,
+                            isScrollControlled: true,
+                            builder: (modalCtx) => StudyRegisterModal(
+                              planId: newRecord.plan_id,
+                              initialRecord: newRecord,
+                              onSave: (record) {
+                                historyProvider.addStudyRecord(record);
+                              },
+                            ),
+                          );
+                        }
+                      }
+                    }, tooltip: 'Iniciar Revisão'),
+                    IconButton(icon: const Icon(Icons.check_circle, color: Colors.teal), onPressed: () async {
+                      final activePlanProvider = Provider.of<ActivePlanProvider>(context, listen: false);
+                      final allSubjectsProvider = Provider.of<AllSubjectsProvider>(context, listen: false);
+                      final planId = activePlanProvider.activePlan?.id;
+
+                      if (planId == null) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Nenhum plano de estudo ativo selecionado.')),
+                        );
+                        return;
+                      }
+
+                      if (studyRecord.subject_id == null) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Erro: A revisão não está associada a nenhuma matéria.')),
+                        );
+                        return;
+                      }
+
+                      final subject = allSubjectsProvider.subjects.firstWhereOrNull((s) => s.id == studyRecord.subject_id);
+
+                      final authProvider = Provider.of<AuthProvider>(context, listen: false); // Adicionado aqui
                       final newRecord = StudyRecord(
-                        id: Uuid().v4(),
+                        id: const Uuid().v4(),
                         userId: authProvider.currentUser!.name,
                         plan_id: planId,
                         date: DateTime.now().toIso8601String().split('T')[0],
-                        subject_id: subjectId,
-                        topic_texts: topic != null ? [topic.topic_text] : [], // Alterado
-                        topic_ids: topic != null ? [topic.id.toString()] : [],   // Adicionado
-                        study_time: time,
+                        subject_id: studyRecord.subject_id!,
                         category: 'revisao',
-                        questions: {},
-                        review_periods: [],
-                        teoria_finalizada: false,
+                        study_time: 0, // Será preenchido no modal
+                        topicsProgress: studyRecord.topicsProgress.map((tp) => tp.copyWith(
+                          isTheoryFinished: true, // Marca como teoria finalizada
+                        )).toList(),
+                        review_periods: reviewRecord.review_period != null ? [reviewRecord.review_period!] : [], // Mantém os períodos originais
                         count_in_planning: true,
-                        pages: [],
-                        videos: [],
                         lastModified: DateTime.now().millisecondsSinceEpoch,
                       );
 
-                      showModalBottomSheet(
+                      await showModalBottomSheet(
                         context: context,
                         isScrollControlled: true,
                         builder: (modalCtx) => StudyRegisterModal(
                           planId: newRecord.plan_id,
                           initialRecord: newRecord,
+                          subject: subject,
                           onSave: (record) {
                             historyProvider.addStudyRecord(record);
+                            reviewProvider.markReviewAsCompleted(reviewRecord);
                           },
                         ),
                       );
-                    }
-                  }
-                }, tooltip: 'Iniciar Revisão'),
-                IconButton(icon: const Icon(Icons.check_circle, color: Colors.teal), onPressed: () async {
-                  final activePlanProvider = Provider.of<ActivePlanProvider>(context, listen: false);
-                  final allSubjectsProvider = Provider.of<AllSubjectsProvider>(context, listen: false);
-                  final planId = activePlanProvider.activePlan?.id;
-
-                  if (planId == null) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Nenhum plano de estudo ativo selecionado.')),
-                    );
-                    return;
-                  }
-
-                  if (studyRecord.subject_id == null) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Erro: A revisão não está associada a nenhuma matéria.')),
-                    );
-                    return;
-                  }
-
-                  final subject = allSubjectsProvider.subjects.firstWhereOrNull((s) => s.id == studyRecord.subject_id);
-
-                  final authProvider = Provider.of<AuthProvider>(context, listen: false); // Adicionado aqui
-                  final newRecord = StudyRecord(
-                    id: Uuid().v4(),
-                    userId: authProvider.currentUser!.name,
-                    plan_id: planId,
-                    date: DateTime.now().toIso8601String().split('T')[0],
-                    subject_id: studyRecord.subject_id!, // Agora seguro por causa da verificação acima
-                    topic_texts: reviewRecord.topics, // Já é uma lista de Strings
-                    topic_ids: [], // Adicionado (reviewRecord.topic não tem ID facilmente acessível aqui)
-                    study_time: 0, // Será preenchido no modal
-                    category: 'revisao',
-                    questions: {},
-                    review_periods: [],
-                    teoria_finalizada: false,
-                    count_in_planning: true,
-                    pages: [],
-                    videos: [],
-                    lastModified: DateTime.now().millisecondsSinceEpoch,
-                  );
-
-                  await showModalBottomSheet(
-                    context: context,
-                    isScrollControlled: true,
-                    builder: (modalCtx) => StudyRegisterModal(
-                      planId: newRecord.plan_id,
-                      initialRecord: newRecord,
-                      subject: subject, // Passa o objeto Subject
-                      onSave: (record) {
-                        historyProvider.addStudyRecord(record);
-                        reviewProvider.markReviewAsCompleted(reviewRecord);
-                      },
-                    ),
-                  );
-                }, tooltip: 'Concluir'),
-                IconButton(icon: const Icon(Icons.cancel, color: Colors.red), onPressed: () {
-                  reviewProvider.ignoreReview(reviewRecord);
-                }, tooltip: 'Ignorar'),
+                    }, tooltip: 'Concluir'),
+                    IconButton(icon: const Icon(Icons.cancel, color: Colors.red), onPressed: () {
+                      reviewProvider.ignoreReview(reviewRecord);
+                    }, tooltip: 'Ignorar'),
+                  ],
+                ),
               ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

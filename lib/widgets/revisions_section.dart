@@ -233,16 +233,16 @@ class RevisionCard extends StatelessWidget {
                       plan_id: planId,
                       date: DateTime.now().toIso8601String().split('T')[0],
                       subject_id: record.subject_id!, // Agora seguro por causa da verificação acima
-                      topic_texts: record.topics, // Já é uma lista de Strings
-                      topic_ids: [], // Adicionado (não há ID disponível no ReviewRecord para aqui)
+                      topicsProgress: record.topics
+                          .map((topicText) => TopicProgress(
+                                topicId: const Uuid().v4(), // Novo ID para o TopicProgress
+                                topicText: topicText,
+                              ))
+                          .toList(),
                       study_time: 0, // Inicia zerado para o usuário preencher
                       category: 'revisao',
-                      questions: {},
                       review_periods: [],
-                      teoria_finalizada: false,
                       count_in_planning: true,
-                      pages: [],
-                      videos: [],
                       lastModified: DateTime.now().millisecondsSinceEpoch,
                     );
 

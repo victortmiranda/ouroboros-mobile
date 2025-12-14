@@ -95,13 +95,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     int totalQuestions = 0;
     int correctQuestions = 0;
     for (var record in allRecords) {
-      if (record.questions.containsKey('total') &&
-          record.questions['total'] is int) {
-        totalQuestions += record.questions['total'] as int;
-      }
-      if (record.questions.containsKey('correct') &&
-          record.questions['correct'] is int) {
-        correctQuestions += record.questions['correct'] as int;
+      for (var tp in record.topicsProgress) {
+        totalQuestions += tp.questions['total'] ?? 0;
+        correctQuestions += tp.questions['correct'] ?? 0;
       }
     }
     final performance =
@@ -119,8 +115,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
       final studiedTopics = <String>{};
       for (var record in allRecords.where((r) => r.plan_id == activePlanId)) {
-        // Adiciona todos os topic_texts do registro à lista de tópicos estudados
-        studiedTopics.addAll(record.topic_texts);
+        // Adiciona todos os topic_texts dos TopicProgress do registro à lista de tópicos estudados
+        studiedTopics.addAll(record.topicsProgress.map((tp) => tp.topicText));
       }
 
       progress =
@@ -207,17 +203,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
             subjectId, (value) => value + record.study_time,
             ifAbsent: () => record.study_time);
 
-        if (record.questions.containsKey('total') &&
-            record.questions['total'] is int) {
+        for (var tp in record.topicsProgress) {
           subjectPerformance[subjectId]!['total'] =
               (subjectPerformance[subjectId]!['total'] ?? 0) +
-                  (record.questions['total'] as int);
-        }
-        if (record.questions.containsKey('correct') &&
-            record.questions['correct'] is int) {
+                  (tp.questions['total'] ?? 0);
           subjectPerformance[subjectId]!['correct'] =
               (subjectPerformance[subjectId]!['correct'] ?? 0) +
-                  (record.questions['correct'] as int);
+                  (tp.questions['correct'] ?? 0);
         }
       }
     }
@@ -262,10 +254,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           final dayIndex = recordDate.difference(weekStartDate).inDays;
           if (dayIndex >= 0 && dayIndex < 7) {
             weeklyData[dayIndex] += Duration(milliseconds: record.study_time);
-            if (record.questions.containsKey('total') &&
-                record.questions['total'] is int) {
-              weeklyQuestionsData[dayIndex] +=
-                  record.questions['total'] as int;
+            for (var tp in record.topicsProgress) {
+              weeklyQuestionsData[dayIndex] += tp.questions['total'] ?? 0;
             }
           }
         }
@@ -316,9 +306,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         if (recordDate.isAfter(startOfWeek.subtract(const Duration(days: 1))) &&
             recordDate.isBefore(endOfWeek.add(const Duration(days: 1)))) {
           weeklyHours += Duration(milliseconds: record.study_time);
-          if (record.questions.containsKey('total') &&
-              record.questions['total'] is int) {
-            weeklyQuestions += record.questions['total'] as int;
+          for (var tp in record.topicsProgress) {
+            weeklyQuestions += tp.questions['total'] ?? 0;
           }
         }
       } catch (e) {

@@ -155,7 +155,80 @@ class Topic {
       lastModified: lastModified ?? this.lastModified,
     );
   }
-}class Subject {
+}
+
+// NEW CLASS: TopicProgress
+class TopicProgress {
+  final String topicId;
+  final String topicText; // Para facilitar a exibição sem precisar buscar o Topic
+  final Map<String, int> questions; // {'total':..., 'correct':...}
+  final List<Map<String, int>> pages; // [{'start':..., 'end':...}]
+  final List<Map<String, String>> videos; // [{'url':..., 'description':...}]
+  final String? notes;
+  final bool isTheoryFinished;
+  final int? userWeight; // Peso do tópico no momento do estudo, pode ser útil
+
+  TopicProgress({
+    required this.topicId,
+    required this.topicText,
+    this.questions = const {'total': 0, 'correct': 0},
+    this.pages = const [],
+    this.videos = const [],
+    this.notes,
+    this.isTheoryFinished = false,
+    this.userWeight,
+  });
+
+  factory TopicProgress.fromMap(Map<String, dynamic> map) {
+    return TopicProgress(
+      topicId: map['topicId'],
+      topicText: map['topicText'],
+      questions: Map<String, int>.from(map['questions'] ?? {'total': 0, 'correct': 0}),
+      pages: (map['pages'] as List<dynamic>?)?.map((e) => Map<String, int>.from(e)).toList() ?? [],
+      videos: (map['videos'] as List<dynamic>?)?.map((e) => Map<String, String>.from(e)).toList() ?? [],
+      notes: map['notes'],
+      isTheoryFinished: map['isTheoryFinished'] ?? false,
+      userWeight: map['userWeight'],
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'topicId': topicId,
+      'topicText': topicText,
+      'questions': questions,
+      'pages': pages,
+      'videos': videos,
+      'notes': notes,
+      'isTheoryFinished': isTheoryFinished,
+      'userWeight': userWeight,
+    };
+  }
+
+  TopicProgress copyWith({
+    String? topicId,
+    String? topicText,
+    Map<String, int>? questions,
+    List<Map<String, int>>? pages,
+    List<Map<String, String>>? videos,
+    String? notes,
+    bool? isTheoryFinished,
+    int? userWeight,
+  }) {
+    return TopicProgress(
+      topicId: topicId ?? this.topicId,
+      topicText: topicText ?? this.topicText,
+      questions: questions ?? this.questions,
+      pages: pages ?? this.pages,
+      videos: videos ?? this.videos,
+      notes: notes ?? this.notes,
+      isTheoryFinished: isTheoryFinished ?? this.isTheoryFinished,
+      userWeight: userWeight ?? this.userWeight,
+    );
+  }
+}
+
+class Subject {
   final String id;
   final String plan_id;
   final String subject;
@@ -287,18 +360,11 @@ class StudyRecord {
   final String plan_id;
   final String date;
   final String subject_id;
-  final List<String> topic_texts; // Alterado para lista de textos de tópicos
-  final List<String> topic_ids;   // Adicionado para IDs de tópicos
   final String category;
   final int study_time;
-  final Map<String, int> questions;
-  final String? material;
-  final String? notes;
+  final List<TopicProgress> topicsProgress; // NOVO: Lista de progresso por tópico
   final List<String> review_periods;
-  final bool teoria_finalizada;
   final bool count_in_planning;
-  final List<dynamic> pages;
-  final List<dynamic> videos;
   final int lastModified;
 
   StudyRecord({
@@ -307,18 +373,11 @@ class StudyRecord {
     required this.plan_id,
     required this.date,
     required this.subject_id,
-    required this.topic_texts, // Alterado
-    required this.topic_ids,   // Adicionado
     required this.category,
     required this.study_time,
-    required this.questions,
-    this.material,
-    this.notes,
+    this.topicsProgress = const [], // NOVO
     required this.review_periods,
-    required this.teoria_finalizada,
     required this.count_in_planning,
-    required this.pages,
-    required this.videos,
     required this.lastModified,
   });
 
@@ -329,19 +388,16 @@ class StudyRecord {
       plan_id: map['plan_id'],
       date: map['date'],
       subject_id: map['subject_id'],
-      topic_texts: List<String>.from(jsonDecode(map['topic_texts'] ?? '[]')), // Decodificar de JSON, com fallback
-      topic_ids: List<String>.from(jsonDecode(map['topic_ids'] ?? '[]')),     // Decodificar de JSON, com fallback
       category: map['category'],
       study_time: map['study_time'],
-      questions: Map<String, int>.from(jsonDecode(map['questions'])),
-      material: map['material'],
-      notes: map['notes'],
-      review_periods: List<String>.from(jsonDecode(map['review_periods'])),
-      teoria_finalizada: map['teoria_finalizada'] == 1,
+      topicsProgress: (jsonDecode(map['topicsProgress'] ?? '[]') as List<dynamic>)
+              .map((e) => TopicProgress.fromMap(e as Map<String, dynamic>))
+              .toList(), // NOVO
+      review_periods:
+          List<String>.from(jsonDecode(map['review_periods'] ?? '[]')),
       count_in_planning: map['count_in_planning'] == 1,
-      pages: List<dynamic>.from(jsonDecode(map['pages'])),
-      videos: List<dynamic>.from(jsonDecode(map['videos'])),
-      lastModified: map['lastModified'] ?? DateTime.now().millisecondsSinceEpoch,
+      lastModified:
+          map['lastModified'] ?? DateTime.now().millisecondsSinceEpoch,
     );
   }
 
@@ -352,18 +408,11 @@ class StudyRecord {
       'plan_id': plan_id,
       'date': date,
       'subject_id': subject_id,
-      'topic_texts': jsonEncode(topic_texts), // Codificar para JSON
-      'topic_ids': jsonEncode(topic_ids),     // Codificar para JSON
       'category': category,
       'study_time': study_time,
-      'questions': jsonEncode(questions),
-      'material': material,
-      'notes': notes,
+      'topicsProgress': jsonEncode(topicsProgress.map((e) => e.toMap()).toList()),
       'review_periods': jsonEncode(review_periods),
-      'teoria_finalizada': teoria_finalizada ? 1 : 0,
       'count_in_planning': count_in_planning ? 1 : 0,
-      'pages': jsonEncode(pages),
-      'videos': jsonEncode(videos),
       'lastModified': lastModified,
     };
   }
@@ -374,18 +423,11 @@ class StudyRecord {
     String? plan_id,
     String? date,
     String? subject_id,
-    List<String>? topic_texts, // Alterado
-    List<String>? topic_ids,   // Adicionado
     String? category,
     int? study_time,
-    Map<String, int>? questions,
-    String? material,
-    String? notes,
+    List<TopicProgress>? topicsProgress, // NOVO
     List<String>? review_periods,
-    bool? teoria_finalizada,
     bool? count_in_planning,
-    List<dynamic>? pages,
-    List<dynamic>? videos,
     int? lastModified,
   }) {
     return StudyRecord(
@@ -394,18 +436,11 @@ class StudyRecord {
       plan_id: plan_id ?? this.plan_id,
       date: date ?? this.date,
       subject_id: subject_id ?? this.subject_id,
-      topic_texts: topic_texts ?? this.topic_texts, // Alterado
-      topic_ids: topic_ids ?? this.topic_ids,     // Adicionado
       category: category ?? this.category,
       study_time: study_time ?? this.study_time,
-      questions: questions ?? this.questions,
-      material: material ?? this.material,
-      notes: notes ?? this.notes,
+      topicsProgress: topicsProgress ?? this.topicsProgress, // NOVO
       review_periods: review_periods ?? this.review_periods,
-      teoria_finalizada: teoria_finalizada ?? this.teoria_finalizada,
       count_in_planning: count_in_planning ?? this.count_in_planning,
-      pages: pages ?? this.pages,
-      videos: videos ?? this.videos,
       lastModified: lastModified ?? this.lastModified,
     );
   }
@@ -944,4 +979,58 @@ class MasterTopic {
 
   }
 
+}
+
+// Helper para agregar dados de TopicProgress
+class AggregatedTopicProgress {
+  final int totalQuestions;
+  final int correctQuestions;
+  final List<Map<String, int>> pages;
+  final List<Map<String, String>> videos;
+  final bool isTeoriaFinalizada;
+  final List<String> topicTexts;
+  final String? notes; // Notas agregadas (se houver, pega a primeira não nula)
+
+  AggregatedTopicProgress({
+    this.totalQuestions = 0,
+    this.correctQuestions = 0,
+    this.pages = const [],
+    this.videos = const [],
+    this.isTeoriaFinalizada = false,
+    this.topicTexts = const [],
+    this.notes,
+  });
+
+  int get incorrectQuestions => totalQuestions - correctQuestions;
+  double get performance => totalQuestions > 0 ? (correctQuestions / totalQuestions) * 100 : 0.0;
+
+  factory AggregatedTopicProgress.fromStudyRecord(StudyRecord record) {
+    int totalQ = 0;
+    int correctQ = 0;
+    List<Map<String, int>> allPages = [];
+    List<Map<String, String>> allVideos = [];
+    bool anyTeoriaFinalizada = false;
+    List<String> allTopicTexts = [];
+    String? firstNote;
+
+    for (var tp in record.topicsProgress) {
+      totalQ += tp.questions['total'] ?? 0;
+      correctQ += tp.questions['correct'] ?? 0;
+      allPages.addAll(tp.pages);
+      allVideos.addAll(tp.videos);
+      if (tp.isTheoryFinished) anyTeoriaFinalizada = true;
+      allTopicTexts.add(tp.topicText);
+      if (firstNote == null && tp.notes != null) firstNote = tp.notes;
+    }
+
+    return AggregatedTopicProgress(
+      totalQuestions: totalQ,
+      correctQuestions: correctQ,
+      pages: allPages.toSet().toList(), // Remove duplicatas de páginas
+      videos: allVideos.toSet().toList(), // Remove duplicatas de vídeos
+      isTeoriaFinalizada: anyTeoriaFinalizada,
+      topicTexts: allTopicTexts,
+      notes: firstNote,
+    );
+  }
 }

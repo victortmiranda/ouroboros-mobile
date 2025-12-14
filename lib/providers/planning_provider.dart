@@ -456,9 +456,9 @@ class PlanningProvider with ChangeNotifier {
 
     if (mentoriaProvider?.sequentialTopics == true) {
             final firstUnstudiedTopic = allTopics.firstWhereOrNull((topic) {
-              // Verifica se a lista topic_texts do record contém o topic.topic_text
-              final topicRecords = studyRecords.where((r) => r.topic_texts.contains(topic.topic_text) && r.subject_id == subject.id).toList();
-              return topicRecords.every((r) => !r.teoria_finalizada);
+              // Verifica se algum TopicProgress no record corresponde a este tópico e se isTheoryFinished é falso
+              return studyRecords.every((r) =>
+                  !r.topicsProgress.any((tp) => tp.topicText == topic.topic_text && tp.isTheoryFinished));
             });
           
             return {
@@ -473,143 +473,163 @@ class PlanningProvider with ChangeNotifier {
           final now = DateTime.now();
           
           for (var topic in allTopics) {
-            // Verifica se a lista topic_texts do record contém o topic.topic_text
-            final topicRecords = studyRecords.where((r) => r.topic_texts.contains(topic.topic_text) && r.subject_id == subject.id).toList();
-      double totalScore = 0;
-      int criteriaCount = 0;
+            // Coleta todos os TopicProgress para este tópico específico, de todos os StudyRecords relevantes
+            final List<TopicProgress> topicProgresses = studyRecords
+                .expand((r) => r.topicsProgress)
+                .where((tp) => tp.topicText == topic.topic_text)
+                .toList();
 
-      if (mentoriaProvider?.useHitRate == true) {
-        final recordsWithQuestions = topicRecords.where((r) => r.questions['total'] != null && r.questions['total']! > 0).toList();
-        double accuracyScore;
-        if (recordsWithQuestions.isEmpty) {
-          accuracyScore = 0.75;
-        } else {
-          int totalCorrect = recordsWithQuestions.map((r) => r.questions['correct'] ?? 0).reduce((a, b) => a + b);
-          int totalQuestions = recordsWithQuestions.map((r) => r.questions['total'] ?? 0).reduce((a, b) => a + b);
-          double accuracy = totalQuestions > 0 ? totalCorrect / totalQuestions : 1.0;
-          accuracyScore = 1.0 - accuracy;
-        }
-        totalScore += accuracyScore;
-        criteriaCount++;
-      }
+            double totalScore = 0;
+            int criteriaCount = 0;
 
-      if (mentoriaProvider?.prioritizeLessStudiedTime == true) {
-        double totalStudyTime = topicRecords.fold(0, (sum, r) => sum + r.study_time);
-        // Normalize, assuming max study time is 10 hours
-        double score = 1.0 - (totalStudyTime / (10 * 3600000)).clamp(0.0, 1.0);
-        totalScore += score;
-        criteriaCount++;
-      }
+            if (mentoriaProvider?.useHitRate == true) {
+              final recordsWithQuestions = topicProgresses.where((tp) => (tp.questions['total'] ?? 0) > 0).toList();
+              double accuracyScore;
+              if (recordsWithQuestions.isEmpty) {
+                accuracyScore = 0.75;
+              } else {
+                int totalCorrect = recordsWithQuestions.map((tp) => tp.questions['correct'] ?? 0).reduce((a, b) => a + b);
+                int totalQuestions = recordsWithQuestions.map((tp) => tp.questions['total'] ?? 0).reduce((a, b) => a + b);
+                double accuracy = totalQuestions > 0 ? totalCorrect / totalQuestions : 1.0;
+                accuracyScore = 1.0 - accuracy;
+              }
+              totalScore += accuracyScore;
+              criteriaCount++;
+            }
 
-      if (mentoriaProvider?.prioritizeMoreStudiedTime == true) {
-        double totalStudyTime = topicRecords.fold(0, (sum, r) => sum + r.study_time);
-        // Normalize, assuming max study time is 10 hours
-        double score = (totalStudyTime / (10 * 3600000)).clamp(0.0, 1.0);
-        totalScore += score;
-        criteriaCount++;
-      }
+            if (mentoriaProvider?.prioritizeLessStudiedTime == true) {
+              double totalStudyTime = studyRecords
+                  .where((r) => r.topicsProgress.any((tp) => tp.topicText == topic.topic_text))
+                  .fold(0, (sum, r) => sum + r.study_time); // study_time ainda é do StudyRecord
+              // Normalize, assuming max study time is 10 hours
+              double score = 1.0 - (totalStudyTime / (10 * 3600000)).clamp(0.0, 1.0);
+              totalScore += score;
+              criteriaCount++;
+            }
 
-      if (mentoriaProvider?.prioritizeMostErrors == true) {
-        int totalErrors = topicRecords.fold(0, (sum, r) => sum + (r.questions['total'] ?? 0) - (r.questions['correct'] ?? 0));
-        // Normalize, assuming max errors is 100
-        double score = (totalErrors / 100.0).clamp(0.0, 1.0);
-        totalScore += score;
-        criteriaCount++;
-      }
+            if (mentoriaProvider?.prioritizeMoreStudiedTime == true) {
+              double totalStudyTime = studyRecords
+                  .where((r) => r.topicsProgress.any((tp) => tp.topicText == topic.topic_text))
+                  .fold(0, (sum, r) => sum + r.study_time);
+              // Normalize, assuming max study time is 10 hours
+              double score = (totalStudyTime / (10 * 3600000)).clamp(0.0, 1.0);
+              totalScore += score;
+              criteriaCount++;
+            }
 
-      if (mentoriaProvider?.prioritizeLeastQuestions == true) {
-        int totalQuestions = topicRecords.fold(0, (sum, r) => sum + (r.questions['total'] ?? 0));
-        // Normalize, assuming max questions is 200
-        double score = 1.0 - (totalQuestions / 200.0).clamp(0.0, 1.0);
-        totalScore += score;
-        criteriaCount++;
-      }
+            if (mentoriaProvider?.prioritizeMostErrors == true) {
+              int totalErrors = topicProgresses.fold(0, (sum, tp) => sum + (tp.questions['total'] ?? 0) - (tp.questions['correct'] ?? 0));
+              // Normalize, assuming max errors is 100
+              double score = (totalErrors / 100.0).clamp(0.0, 1.0);
+              totalScore += score;
+              criteriaCount++;
+            }
 
-      if (mentoriaProvider?.prioritizePendingReviews == true) {
-        final pendingReviews = reviewRecords.where((r) => r.topics.contains(topic.topic_text) && r.subject_id == subject.id && r.status == 'pending').toList();
-        if (pendingReviews.isNotEmpty) {
-          totalScore += 1.0;
-        }
-        criteriaCount++;
-      }
+            if (mentoriaProvider?.prioritizeLeastQuestions == true) {
+              int totalQuestions = topicProgresses.fold(0, (sum, tp) => sum + (tp.questions['total'] ?? 0));
+              // Normalize, assuming max questions is 200
+              double score = 1.0 - (totalQuestions / 200.0).clamp(0.0, 1.0);
+              totalScore += score;
+              criteriaCount++;
+            }
 
-      if (mentoriaProvider?.prioritizeMostReviewed == true) {
-        final reviewedCount = reviewRecords.where((r) => r.topics.contains(topic.topic_text) && r.subject_id == subject.id).length;
-        // Normalize, assuming max reviews is 10
-        double score = (reviewedCount / 10.0).clamp(0.0, 1.0);
-        totalScore += score;
-        criteriaCount++;
-      }
+            if (mentoriaProvider?.prioritizePendingReviews == true) {
+              // ReviewRecords ainda tem List<String> topics, então a comparação é direta
+              final pendingReviews = reviewRecords.where((r) => r.topics.contains(topic.topic_text) && r.subject_id == subject.id && r.status == 'pending').toList();
+              if (pendingReviews.isNotEmpty) {
+                totalScore += 1.0;
+              }
+              criteriaCount++;
+            }
 
-      if (mentoriaProvider?.prioritizeRecentlyAdded == true) {
-        // This is hard to implement without topic creation date
-      }
+            if (mentoriaProvider?.prioritizeMostReviewed == true) {
+              final reviewedCount = reviewRecords.where((r) => r.topics.contains(topic.topic_text) && r.subject_id == subject.id).length;
+              // Normalize, assuming max reviews is 10
+              double score = (reviewedCount / 10.0).clamp(0.0, 1.0);
+              totalScore += score;
+              criteriaCount++;
+            }
 
-      if (mentoriaProvider?.prioritizeNotStudiedInTimeWindow == true) {
-        if (topicRecords.isEmpty) {
-          totalScore += 1.0;
-        } else {
-          topicRecords.sort((a, b) => DateTime.parse(b.date).compareTo(DateTime.parse(a.date)));
-          final lastStudied = DateTime.parse(topicRecords.first.date);
-          final daysSince = now.difference(lastStudied).inDays;
-          if (daysSince >= (mentoriaProvider?.notStudiedInDays ?? 7)) {
-            totalScore += 1.0;
+            if (mentoriaProvider?.prioritizeRecentlyAdded == true) {
+              // This is hard to implement without topic creation date
+            }
+
+            if (mentoriaProvider?.prioritizeNotStudiedInTimeWindow == true) {
+              if (topicProgresses.isEmpty) { // Se não há progresso para o tópico
+                totalScore += 1.0;
+              } else {
+                // Encontrar o último StudyRecord que contém este tópico
+                final relevantRecords = studyRecords
+                    .where((r) => r.topicsProgress.any((tp) => tp.topicText == topic.topic_text))
+                    .toList();
+                if (relevantRecords.isNotEmpty) {
+                    relevantRecords.sort((a, b) => DateTime.parse(b.date).compareTo(DateTime.parse(a.date)));
+                    final lastStudied = DateTime.parse(relevantRecords.first.date);
+                    final daysSince = now.difference(lastStudied).inDays;
+                    if (daysSince >= (mentoriaProvider?.notStudiedInDays ?? 7)) {
+                      totalScore += 1.0;
+                    }
+                } else {
+                    totalScore += 1.0; // Nunca estudado
+                }
+              }
+              criteriaCount++;
+            }
+
+            // Prioritize by Topic Weights
+            if (mentoriaProvider?.prioritizeTopicWeights == true && topic.userWeight != null) {
+              // Normalize userWeight (1-5) to a 0.0-1.0 scale
+              double normalizedWeight = (topic.userWeight! - 1) / 4.0;
+              totalScore += normalizedWeight;
+              criteriaCount++;
+            }
+
+            // Prioritize topics not recently studied
+            if (mentoriaProvider?.prioritizeNotRecentlyStudied == true) {
+                final relevantRecords = studyRecords
+                    .where((r) => r.topicsProgress.any((tp) => tp.topicText == topic.topic_text))
+                    .toList();
+                if (relevantRecords.isNotEmpty) {
+                    relevantRecords.sort((a, b) => DateTime.parse(b.date).compareTo(DateTime.parse(a.date)));
+                    final lastStudiedDate = DateTime.parse(relevantRecords.first.date);
+                    final difference = now.difference(lastStudiedDate);
+                    if (difference.inDays < 1) { // Penalize if studied within the last day
+                      totalScore -= 0.5; // Significant penalty
+                    }
+                } else {
+                    totalScore += 0.5; // Slightly prefer topics never studied
+                }
+                criteriaCount++;
+            }
+
+            // Prioritize unfinished topics
+            if (mentoriaProvider?.prioritizeUnfinishedTopics == true) {
+                final bool teoriaFinalizada = topicProgresses.any((tp) => tp.isTheoryFinished);
+                if (teoriaFinalizada) {
+                  totalScore += 0.0; // No score for finished theory
+                } else {
+                  totalScore += 1.0; // Full score for unfinished theory
+                }
+                criteriaCount++;
+            }
+
+            double finalScore = criteriaCount > 0 ? totalScore / criteriaCount : 0;
+
+            if (finalScore > maxScore) {
+              maxScore = finalScore;
+              bestTopic = topic;
+            }
           }
-        }
-        criteriaCount++;
-      }
 
-      // NEW: Prioritize by Topic Weights
-      if (mentoriaProvider?.prioritizeTopicWeights == true && topic.userWeight != null) {
-        // Normalize userWeight (1-5) to a 0.0-1.0 scale
-        double normalizedWeight = (topic.userWeight! - 1) / 4.0;
-        totalScore += normalizedWeight;
-        criteriaCount++;
-      }
-
-      // NEW: Prioritize topics not recently studied
-      if (mentoriaProvider?.prioritizeNotRecentlyStudied == true) {
-        if (topicRecords.isNotEmpty) {
-          topicRecords.sort((a, b) => DateTime.parse(b.date).compareTo(DateTime.parse(a.date)));
-          final lastStudiedDate = DateTime.parse(topicRecords.first.date);
-          final difference = now.difference(lastStudiedDate);
-          if (difference.inDays < 1) { // Penalize if studied within the last day
-            totalScore -= 0.5; // Significant penalty
+          String justification = 'Sugerido com base nos seus critérios de mentoria.';
+          if (bestTopic == null && allTopics.isNotEmpty) {
+            bestTopic = allTopics.first; // Fallback
           }
-        } else {
-          totalScore += 0.5; // Slightly prefer topics never studied
-        }
-        criteriaCount++;
-      }
 
-      // NEW: Prioritize unfinished topics
-      if (mentoriaProvider?.prioritizeUnfinishedTopics == true) {
-        final bool teoriaFinalizada = topicRecords.any((r) => r.teoria_finalizada);
-        if (teoriaFinalizada) {
-          totalScore += 0.0; // No score for finished theory
-        } else {
-          totalScore += 1.0; // Full score for unfinished theory
-        }
-        criteriaCount++;
-      }
-
-      double finalScore = criteriaCount > 0 ? totalScore / criteriaCount : 0;
-
-      if (finalScore > maxScore) {
-        maxScore = finalScore;
-        bestTopic = topic;
-      }
-    }
-
-    String justification = 'Sugerido com base nos seus critérios de mentoria.';
-    if (bestTopic == null && allTopics.isNotEmpty) {
-      bestTopic = allTopics.first; // Fallback
-    }
-
-    return {
-      'recommendedTopic': bestTopic,
-      'justification': justification,
-      'nextSession': nextSession,
-    };
+          return {
+            'recommendedTopic': bestTopic,
+            'justification': justification,
+            'nextSession': nextSession,
+          };
   }
 }

@@ -59,14 +59,15 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
         .where((record) => record.subject_id == widget.subject.id)
         .fold<int>(0, (sum, record) {
           int recordPagesSum = 0;
-          if (record.pages.isNotEmpty) {
-            for (var p in record.pages) {
-
-              if (p is Map<String, dynamic> && p.containsKey('start') && p.containsKey('end')) {
-                final start = p['start'] as int?;
-                final end = p['end'] as int?;
-                if (start != null && end != null) {
-                  recordPagesSum += (end - start + 1);
+          for (var tp in record.topicsProgress) {
+            if (tp.pages.isNotEmpty) {
+              for (var p in tp.pages) {
+                if (p is Map<String, dynamic> && p.containsKey('start') && p.containsKey('end')) {
+                  final start = p['start'] as int?;
+                  final end = p['end'] as int?;
+                  if (start != null && end != null) {
+                    recordPagesSum += (end - start + 1);
+                  }
                 }
               }
             }
@@ -222,8 +223,8 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
 
   int _countStudiedTopics(List<Topic> topics, List<StudyRecord> records) {
     int count = 0;
-    // Coleta todos os topic_texts de todos os records e os transforma em um Set<String>
-    final studiedTopicTexts = records.expand((r) => r.topic_texts).toSet();
+    // Coleta todos os topicTexts de todos os TopicProgress de todos os records
+    final studiedTopicTexts = records.expand((r) => r.topicsProgress.map((tp) => tp.topicText)).toSet();
     for (final topic in topics) {
       if (studiedTopicTexts.contains(topic.topic_text)) {
         count++;
@@ -243,8 +244,8 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
           topic: topic,
           depth: depth,
           isInitiallyExpanded: _allTopicsExpanded,
-          // Coleta todos os topic_texts de todos os records e os transforma em um Set<String>
-          studiedTopicTexts: records.expand((r) => r.topic_texts).toSet(), // Corrigido aqui
+          // Coleta todos os topicTexts de todos os TopicProgress de todos os records
+          studiedTopicTexts: records.expand((r) => r.topicsProgress.map((tp) => tp.topicText)).toSet(),
           onAdd: (Topic topic) => _openStudyRegisterModal(topic: topic),
         ),
       );
@@ -324,6 +325,8 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
       itemCount: records.length,
       itemBuilder: (ctx, index) {
         final record = records[index];
+        final aggregatedProgress = AggregatedTopicProgress.fromStudyRecord(record);
+
         return Card(
           margin: const EdgeInsets.symmetric(vertical: 8.0),
           elevation: 2.0,
@@ -362,8 +365,8 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  record.topic_texts.isNotEmpty
-                      ? record.topic_texts.join(', ')
+                  aggregatedProgress.topicTexts.isNotEmpty
+                      ? aggregatedProgress.topicTexts.join(', ')
                       : 'N/A', // Exibe todos os tópicos ou 'N/A'
                   style: const TextStyle(fontSize: 14, color: Colors.black87),
                 ),

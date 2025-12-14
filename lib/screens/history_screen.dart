@@ -105,70 +105,65 @@ class _HistoryScreenState extends State<HistoryScreen> {
   @override
   Widget build(BuildContext context) {
     print('HistoryScreen: build chamado.');
-    return Consumer<FilterProvider>(
-      builder: (context, filterProvider, child) {
-        return Scaffold(
-          body: Consumer<HistoryProvider>(
-            builder: (context, provider, child) {
-              print('HistoryScreen Consumer: isLoading=${provider.isLoading}, records.isEmpty=${provider.records.isEmpty}');
-              if (provider.isLoading) {
-                return const Center(child: CircularProgressIndicator(color: Colors.teal));
-              }
+    return Consumer<HistoryProvider>(
+      builder: (context, provider, child) {
+        print('HistoryScreen Consumer: isLoading=${provider.isLoading}, records.isEmpty=${provider.records.isEmpty}');
+        if (provider.isLoading) {
+          return const Center(child: CircularProgressIndicator(color: Colors.teal));
+        }
 
-              final filteredRecords = provider.records; // Records are already filtered by provider
+        final filteredRecords = provider.records; // Records are already filtered by provider
 
-              if (filteredRecords.isEmpty) {
-                final bool filtersAreActive = filterProvider.historyStartDate != null ||
-                    filterProvider.historyEndDate != null ||
-                    filterProvider.historyMinDuration != null ||
-                    filterProvider.historyMaxDuration != null ||
-                    filterProvider.historyMinPerformance != null ||
-                    filterProvider.historyMaxPerformance != null ||
-                    filterProvider.historySelectedCategories.isNotEmpty ||
-                    filterProvider.historySelectedSubjects.isNotEmpty ||
-                    filterProvider.historySelectedTopics.isNotEmpty;
+        if (filteredRecords.isEmpty) {
+          final filterProvider = Provider.of<FilterProvider>(context, listen: false);
+          final bool filtersAreActive = filterProvider.historyStartDate != null ||
+              filterProvider.historyEndDate != null ||
+              filterProvider.historyMinDuration != null ||
+              filterProvider.historyMaxDuration != null ||
+              filterProvider.historyMinPerformance != null ||
+              filterProvider.historyMaxPerformance != null ||
+              filterProvider.historySelectedCategories.isNotEmpty ||
+              filterProvider.historySelectedSubjects.isNotEmpty ||
+              filterProvider.historySelectedTopics.isNotEmpty;
 
-                return Center(
-                  child: Text(
-                    filtersAreActive
-                        ? 'Nenhum registro corresponde aos filtros aplicados.'
-                        : 'Nenhum registro de estudo encontrado. Comece adicionando seu primeiro estudo!',
-                    style: const TextStyle(fontSize: 18, color: Colors.grey),
-                    textAlign: TextAlign.center,
-                  ),
-                );
-              }
+          return Center(
+            child: Text(
+              filtersAreActive
+                  ? 'Nenhum registro corresponde aos filtros aplicados.'
+                  : 'Nenhum registro de estudo encontrado. Comece adicionando seu primeiro estudo!',
+              style: const TextStyle(fontSize: 18, color: Colors.grey),
+              textAlign: TextAlign.center,
+            ),
+          );
+        }
 
-              // Group records by date
-              final groupedRecords = <String, List<StudyRecord>>{};
-              for (var record in filteredRecords) {
-                final dateKey = DateFormat('dd/MM/yyyy').format(DateTime.parse(record.date));
-                groupedRecords.putIfAbsent(dateKey, () => []).add(record);
-              }
+        // Group records by date
+        final groupedRecords = <String, List<StudyRecord>>{};
+        for (var record in filteredRecords) {
+          final dateKey = DateFormat('dd/MM/yyyy').format(DateTime.parse(record.date));
+          groupedRecords.putIfAbsent(dateKey, () => []).add(record);
+        }
 
-              final sortedDates = groupedRecords.keys.toList()
-                ..sort((a, b) => DateFormat('dd/MM/yyyy').parse(b).compareTo(DateFormat('dd/MM/yyyy').parse(a)));
+        final sortedDates = groupedRecords.keys.toList()
+          ..sort((a, b) => DateFormat('dd/MM/yyyy').parse(b).compareTo(DateFormat('dd/MM/yyyy').parse(a)));
 
-              return ListView(
-                padding: const EdgeInsets.all(16.0),
+        return ListView(
+          padding: const EdgeInsets.all(16.0),
+          children: [
+            ...sortedDates.map((date) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  ...sortedDates.map((date) {
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 8.0),
-                          child: Text(date, style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
-                        ),
-                        ...groupedRecords[date]!.map((record) => _buildRecordCard(context, record)).toList(),
-                        const SizedBox(height: 16),
-                      ],
-                    );
-                  }).toList(),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8.0),
+                    child: Text(date, style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
+                  ),
+                  ...groupedRecords[date]!.map((record) => _buildRecordCard(context, record)).toList(),
+                  const SizedBox(height: 16),
                 ],
               );
-            },
-          ),
+            }).toList(),
+          ],
         );
       },
     );
@@ -176,9 +171,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   Widget _buildRecordCard(BuildContext context, StudyRecord record) {
     final time = _formatTime(record.study_time); // Use helper
-    final correctQuestions = record.questions['correct'] ?? 0;
-    final totalQuestions = record.questions['total'] ?? 0;
-    final incorrectQuestions = totalQuestions - correctQuestions;
+    final aggregatedProgress = AggregatedTopicProgress.fromStudyRecord(record);
+    final correctQuestions = aggregatedProgress.correctQuestions;
+    final totalQuestions = aggregatedProgress.totalQuestions;
+    final incorrectQuestions = aggregatedProgress.incorrectQuestions;
     final questionsText = totalQuestions > 0
         ? '$correctQuestions acertos, $incorrectQuestions erros'
         : 'Nenhuma questão registrada';
@@ -208,8 +204,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 children: [
                   Text(subjectName, style: Theme.of(context).textTheme.titleMedium),
                   Text(
-                    record.topic_texts.isNotEmpty
-                        ? record.topic_texts.join(', ')
+                    aggregatedProgress.topicTexts.isNotEmpty
+                        ? aggregatedProgress.topicTexts.join(', ')
                         : 'N/A', // Exibe todos os tópicos ou 'N/A'
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.bold),
                   ),
